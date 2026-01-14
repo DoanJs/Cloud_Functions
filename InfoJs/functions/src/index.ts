@@ -4,6 +4,7 @@ import {onRequest} from "firebase-functions/v2/https";
 import bcrypt from "bcrypt";
 import * as crypto from "crypto";
 import {defineSecret} from "firebase-functions/params";
+import {templeDoc} from "./templeDoc";
 
 setGlobalOptions({region: "asia-southeast1"});
 admin.initializeApp();
@@ -113,168 +114,10 @@ export const createSampleDoc = onRequest(async (req, res) => {
     // const key = getAESKey(secret, uid);
     const key = await getAESKeyAsync(secret, uid);
 
-    const plaintext =
-      "📓 Nhật ký ngày thứ nhất\n📝 Đây là nội dung bí mật." +
-      "Ngày xửa ngày xưa, có một con Rùa và một con Thỏ sống "+
-      "trong một khu rừng xinh đẹp và yên tĩnh. Ngày ngày chúng "+
-      "vui chơi với nhau như hai người bạn thân. Một hôm, "+
-      "Thỏ và Rùa cãi nhau xem ai nhanh hơn.\n"+
-      "Rồi chúng quyết định giải quyết việc tranh "+
-      "luận bằng một cuộc thi chạy đua. Thỏ và Rùa đồng "+
-      "ý lộ trình và bắt đầu cuộc đua. Thỏ xuất phát nhanh "+
-      "như tên bắn và chạy thục mạng rất nhanh, khi thấy "+
-      "rằng mình đã khá xa Rùa, Thỏ nghĩ nên nghỉ cho đỡ "+
-      "mệt dưới một bóng cây xum xuê lá bên vệ đường.\n"+
-      "Vì quá tự tin vào khả năng giành chiến thắng của "+
-      "mình, Thỏ ngồi dưới bóng cây và nhanh chóng ngủ "+
-      "thiếp đi. Rùa chạy mãi rồi cũng đến nơi, thấy "+
-      "Thỏ đang ngủ ngon giấc Rùa từ từ vượt qua Thỏ "+
-      "và về đích trước Thỏ. Khi Thỏ thức dậy thì rùa"+
-      " đã đến đích và trở thành người chiến thắng.\n"+
-      "Rùa vì sự kiên trì bền bỉ mà chiến thắng chú Thỏ.\n"+
-      "Lúc này Thỏ biết mình đã thua cuộc vì quá "+
-      "tự tin vào khả năng của mình, còn Rùa chiến "+
-      "thắng vì kiên trì bám đuổi mục tiêu và làm "+
-      "việc hết sức trong khả năng của mình, cộng "+
-      "với một chút may mắn và giành chiến thắng.\n"+
-      "Truyện giáo dục đức tính kiên trì, siêng năng, "+
-      "nhẫn nại. Những người nhanh nhẹn nhưng cẩu thả "+
-      "trong suy nghĩ cuối cùng cũng sẽ bị đánh bại bởi "+
-      "người kiên nhẫn, siêng năng dù họ chậm hơn rất nhiều.\n\n\n"+
-      "Ngày xửa ngày xưa, có một con Rùa và một con Thỏ sống "+
-      "trong một khu rừng xinh đẹp và yên tĩnh. Ngày ngày chúng "+
-      "vui chơi với nhau như hai người bạn thân. Một hôm, "+
-      "Thỏ và Rùa cãi nhau xem ai nhanh hơn.\n"+
-      "Rồi chúng quyết định giải quyết việc tranh "+
-      "luận bằng một cuộc thi chạy đua. Thỏ và Rùa đồng "+
-      "ý lộ trình và bắt đầu cuộc đua. Thỏ xuất phát nhanh "+
-      "như tên bắn và chạy thục mạng rất nhanh, khi thấy "+
-      "rằng mình đã khá xa Rùa, Thỏ nghĩ nên nghỉ cho đỡ "+
-      "mệt dưới một bóng cây xum xuê lá bên vệ đường.\n"+
-      "Vì quá tự tin vào khả năng giành chiến thắng của "+
-      "mình, Thỏ ngồi dưới bóng cây và nhanh chóng ngủ "+
-      "thiếp đi. Rùa chạy mãi rồi cũng đến nơi, thấy "+
-      "Thỏ đang ngủ ngon giấc Rùa từ từ vượt qua Thỏ "+
-      "và về đích trước Thỏ. Khi Thỏ thức dậy thì rùa"+
-      " đã đến đích và trở thành người chiến thắng.\n"+
-      "Rùa vì sự kiên trì bền bỉ mà chiến thắng chú Thỏ.\n"+
-      "Lúc này Thỏ biết mình đã thua cuộc vì quá "+
-      "tự tin vào khả năng của mình, còn Rùa chiến "+
-      "thắng vì kiên trì bám đuổi mục tiêu và làm "+
-      "việc hết sức trong khả năng của mình, cộng "+
-      "với một chút may mắn và giành chiến thắng.\n"+
-      "Truyện giáo dục đức tính kiên trì, siêng năng, "+
-      "nhẫn nại. Những người nhanh nhẹn nhưng cẩu thả "+
-      "trong suy nghĩ cuối cùng cũng sẽ bị đánh bại bởi "+
-      "người kiên nhẫn, siêng năng dù họ chậm hơn rất nhiều.\n\n\n"+
-      "Ngày xửa ngày xưa, có một con Rùa và một con Thỏ sống "+
-      "trong một khu rừng xinh đẹp và yên tĩnh. Ngày ngày chúng "+
-      "vui chơi với nhau như hai người bạn thân. Một hôm, "+
-      "Thỏ và Rùa cãi nhau xem ai nhanh hơn.\n"+
-      "Rồi chúng quyết định giải quyết việc tranh "+
-      "luận bằng một cuộc thi chạy đua. Thỏ và Rùa đồng "+
-      "ý lộ trình và bắt đầu cuộc đua. Thỏ xuất phát nhanh "+
-      "như tên bắn và chạy thục mạng rất nhanh, khi thấy "+
-      "rằng mình đã khá xa Rùa, Thỏ nghĩ nên nghỉ cho đỡ "+
-      "mệt dưới một bóng cây xum xuê lá bên vệ đường.\n"+
-      "Vì quá tự tin vào khả năng giành chiến thắng của "+
-      "mình, Thỏ ngồi dưới bóng cây và nhanh chóng ngủ "+
-      "thiếp đi. Rùa chạy mãi rồi cũng đến nơi, thấy "+
-      "Thỏ đang ngủ ngon giấc Rùa từ từ vượt qua Thỏ "+
-      "và về đích trước Thỏ. Khi Thỏ thức dậy thì rùa"+
-      " đã đến đích và trở thành người chiến thắng.\n"+
-      "Rùa vì sự kiên trì bền bỉ mà chiến thắng chú Thỏ.\n"+
-      "Lúc này Thỏ biết mình đã thua cuộc vì quá "+
-      "tự tin vào khả năng của mình, còn Rùa chiến "+
-      "thắng vì kiên trì bám đuổi mục tiêu và làm "+
-      "việc hết sức trong khả năng của mình, cộng "+
-      "với một chút may mắn và giành chiến thắng.\n"+
-      "Truyện giáo dục đức tính kiên trì, siêng năng, "+
-      "nhẫn nại. Những người nhanh nhẹn nhưng cẩu thả "+
-      "trong suy nghĩ cuối cùng cũng sẽ bị đánh bại bởi "+
-      "người kiên nhẫn, siêng năng dù họ chậm hơn rất nhiều.\n\n\n"+
-      "Ngày xửa ngày xưa, có một con Rùa và một con Thỏ sống "+
-      "trong một khu rừng xinh đẹp và yên tĩnh. Ngày ngày chúng "+
-      "vui chơi với nhau như hai người bạn thân. Một hôm, "+
-      "Thỏ và Rùa cãi nhau xem ai nhanh hơn.\n"+
-      "Rồi chúng quyết định giải quyết việc tranh "+
-      "luận bằng một cuộc thi chạy đua. Thỏ và Rùa đồng "+
-      "ý lộ trình và bắt đầu cuộc đua. Thỏ xuất phát nhanh "+
-      "như tên bắn và chạy thục mạng rất nhanh, khi thấy "+
-      "rằng mình đã khá xa Rùa, Thỏ nghĩ nên nghỉ cho đỡ "+
-      "mệt dưới một bóng cây xum xuê lá bên vệ đường.\n"+
-      "Vì quá tự tin vào khả năng giành chiến thắng của "+
-      "mình, Thỏ ngồi dưới bóng cây và nhanh chóng ngủ "+
-      "thiếp đi. Rùa chạy mãi rồi cũng đến nơi, thấy "+
-      "Thỏ đang ngủ ngon giấc Rùa từ từ vượt qua Thỏ "+
-      "và về đích trước Thỏ. Khi Thỏ thức dậy thì rùa"+
-      " đã đến đích và trở thành người chiến thắng.\n"+
-      "Rùa vì sự kiên trì bền bỉ mà chiến thắng chú Thỏ.\n"+
-      "Lúc này Thỏ biết mình đã thua cuộc vì quá "+
-      "tự tin vào khả năng của mình, còn Rùa chiến "+
-      "thắng vì kiên trì bám đuổi mục tiêu và làm "+
-      "việc hết sức trong khả năng của mình, cộng "+
-      "với một chút may mắn và giành chiến thắng.\n"+
-      "Truyện giáo dục đức tính kiên trì, siêng năng, "+
-      "nhẫn nại. Những người nhanh nhẹn nhưng cẩu thả "+
-      "trong suy nghĩ cuối cùng cũng sẽ bị đánh bại bởi "+
-      "người kiên nhẫn, siêng năng dù họ chậm hơn rất nhiều.\n\n\n"+
-      "Ngày xửa ngày xưa, có một con Rùa và một con Thỏ sống "+
-      "trong một khu rừng xinh đẹp và yên tĩnh. Ngày ngày chúng "+
-      "vui chơi với nhau như hai người bạn thân. Một hôm, "+
-      "Thỏ và Rùa cãi nhau xem ai nhanh hơn.\n"+
-      "Rồi chúng quyết định giải quyết việc tranh "+
-      "luận bằng một cuộc thi chạy đua. Thỏ và Rùa đồng "+
-      "ý lộ trình và bắt đầu cuộc đua. Thỏ xuất phát nhanh "+
-      "như tên bắn và chạy thục mạng rất nhanh, khi thấy "+
-      "rằng mình đã khá xa Rùa, Thỏ nghĩ nên nghỉ cho đỡ "+
-      "mệt dưới một bóng cây xum xuê lá bên vệ đường.\n"+
-      "Vì quá tự tin vào khả năng giành chiến thắng của "+
-      "mình, Thỏ ngồi dưới bóng cây và nhanh chóng ngủ "+
-      "thiếp đi. Rùa chạy mãi rồi cũng đến nơi, thấy "+
-      "Thỏ đang ngủ ngon giấc Rùa từ từ vượt qua Thỏ "+
-      "và về đích trước Thỏ. Khi Thỏ thức dậy thì rùa"+
-      " đã đến đích và trở thành người chiến thắng.\n"+
-      "Rùa vì sự kiên trì bền bỉ mà chiến thắng chú Thỏ.\n"+
-      "Lúc này Thỏ biết mình đã thua cuộc vì quá "+
-      "tự tin vào khả năng của mình, còn Rùa chiến "+
-      "thắng vì kiên trì bám đuổi mục tiêu và làm "+
-      "việc hết sức trong khả năng của mình, cộng "+
-      "với một chút may mắn và giành chiến thắng.\n"+
-      "Truyện giáo dục đức tính kiên trì, siêng năng, "+
-      "nhẫn nại. Những người nhanh nhẹn nhưng cẩu thả "+
-      "trong suy nghĩ cuối cùng cũng sẽ bị đánh bại bởi "+
-      "người kiên nhẫn, siêng năng dù họ chậm hơn rất nhiều.\n\n\n"+
-      "Ngày xửa ngày xưa, có một con Rùa và một con Thỏ sống "+
-      "trong một khu rừng xinh đẹp và yên tĩnh. Ngày ngày chúng "+
-      "vui chơi với nhau như hai người bạn thân. Một hôm, "+
-      "Thỏ và Rùa cãi nhau xem ai nhanh hơn.\n"+
-      "Rồi chúng quyết định giải quyết việc tranh "+
-      "luận bằng một cuộc thi chạy đua. Thỏ và Rùa đồng "+
-      "ý lộ trình và bắt đầu cuộc đua. Thỏ xuất phát nhanh "+
-      "như tên bắn và chạy thục mạng rất nhanh, khi thấy "+
-      "rằng mình đã khá xa Rùa, Thỏ nghĩ nên nghỉ cho đỡ "+
-      "mệt dưới một bóng cây xum xuê lá bên vệ đường.\n"+
-      "Vì quá tự tin vào khả năng giành chiến thắng của "+
-      "mình, Thỏ ngồi dưới bóng cây và nhanh chóng ngủ "+
-      "thiếp đi. Rùa chạy mãi rồi cũng đến nơi, thấy "+
-      "Thỏ đang ngủ ngon giấc Rùa từ từ vượt qua Thỏ "+
-      "và về đích trước Thỏ. Khi Thỏ thức dậy thì rùa"+
-      " đã đến đích và trở thành người chiến thắng.\n"+
-      "Rùa vì sự kiên trì bền bỉ mà chiến thắng chú Thỏ.\n"+
-      "Lúc này Thỏ biết mình đã thua cuộc vì quá "+
-      "tự tin vào khả năng của mình, còn Rùa chiến "+
-      "thắng vì kiên trì bám đuổi mục tiêu và làm "+
-      "việc hết sức trong khả năng của mình, cộng "+
-      "với một chút may mắn và giành chiến thắng.\n"+
-      "Truyện giáo dục đức tính kiên trì, siêng năng, "+
-      "nhẫn nại. Những người nhanh nhẹn nhưng cẩu thả "+
-      "trong suy nghĩ cuối cùng cũng sẽ bị đánh bại bởi "+
-      "người kiên nhẫn, siêng năng dù họ chậm hơn rất nhiều.\n\n\n";
-
+    const plaintext = templeDoc;
     const encrypted = encryptAESGCM(plaintext, key);
 
-    await db.collection("documents").doc("nhatkyngaythunhat").set({
+    await db.collection("documents").doc("nhatkyngaythuhai").set({
       ...encrypted,
       createdAt: Date.now(),
     });
@@ -291,6 +134,7 @@ export const telegramWebhook = onRequest(
     res.status(200).send("ok");
 
     const message = req.body.message;
+    console.log("update_id:", req.body.update_id);
     if (!message?.text) return;
 
     const chatId = message.chat.id;
@@ -298,8 +142,8 @@ export const telegramWebhook = onRequest(
 
     const [command, secret] = text.split(/\s+/);
 
-    if (command !== "/nhatkyngaythunhat" || !secret) {
-      return sendTelegram(chatId, "❌ Cú pháp: /nhatkyngaythunhat <secret>");
+    if (command !== "/nhatkyngaythuhai" || !secret) {
+      return sendTelegram(chatId, "❌ Cú pháp: /nhatkyngaythuhai <secret>");
     }
 
     // 🔎 tìm user
@@ -325,7 +169,7 @@ export const telegramWebhook = onRequest(
     // 📄 lấy document
     // const docSnap = await db
     //   .collection("documents")
-    //   .doc("nhatkyngaythunhat")
+    //   .doc("nhatkyngaythuhai")
     //   .get();
 
     // if (!docSnap.exists) {
@@ -353,7 +197,7 @@ export const telegramWebhook = onRequest(
 
     await db.collection("viewTokens").doc(token).set({
       uid: userDoc.id,
-      docId: "nhatkyngaythunhat",
+      docId: "nhatkyngaythuhai",
       secret,
       used: false,
       expiresAt: Date.now() + 60000,
@@ -364,7 +208,7 @@ export const telegramWebhook = onRequest(
 
     await sendTelegram(
       chatId,
-      "📓 Nhật ký ngày thứ nhất\n" +
+      "📓 Nhật ký ngày thứ hai\n" +
       "⏱ Link chỉ dùng 1 lần (60s)\n" +
       `👉 ${url}`
     );
@@ -428,6 +272,8 @@ export const view = onRequest(async (req, res) => {
       tx.update(ref, {used: true});
     });
 
+    console.log("plain: ", plain.length);
+    console.log("templeDoc: ", templeDoc.length);
     // ✅ CHỈ SEND RESPONSE 1 LẦN – NGOÀI TRANSACTION
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(`
