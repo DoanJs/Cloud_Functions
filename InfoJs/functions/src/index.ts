@@ -4,12 +4,13 @@ import {onRequest} from "firebase-functions/v2/https";
 import bcrypt from "bcrypt";
 import * as crypto from "crypto";
 import {defineSecret} from "firebase-functions/params";
-import {templeDoc} from "./templeDoc";
+// import {templeDoc} from "./templeDoc";
 
 setGlobalOptions({region: "asia-southeast1"});
 admin.initializeApp();
 const db = admin.firestore();
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
+const MASTER_KEY = defineSecret("MASTER_KEY"); // base64, 32 bytes
 
 async function sendTelegram(chatId: number, text: string) {
   await fetch(
@@ -24,51 +25,84 @@ async function sendTelegram(chatId: number, text: string) {
 // function getAESKey(secret: string, uid: string): Buffer {
 //   return crypto.pbkdf2Sync(secret, uid, 100_000, 32, "sha256");
 // }
-function getAESKeyAsync(secret: string, uid: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    crypto.pbkdf2(
-      secret,
-      uid,
-      100_000,
-      32,
-      "sha256",
-      (err, key) => {
-        if (err) reject(err);
-        else resolve(key);
-      }
-    );
-  });
-}
+// function getAESKeyAsync(secret: string, uid: string): Promise<Buffer> {
+//   return new Promise((resolve, reject) => {
+//     crypto.pbkdf2(
+//       secret,
+//       uid,
+//       100_000,
+//       32,
+//       "sha256",
+//       (err, key) => {
+//         if (err) reject(err);
+//         else resolve(key);
+//       }
+//     );
+//   });
+// }
+// function encryptAESGCM(plaintext: string, key: Buffer) {
+//   const iv = crypto.randomBytes(12);
+//   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
 
-function encryptAESGCM(plaintext: string, key: Buffer) {
+//   let encrypted = cipher.update(plaintext, "utf8", "base64");
+//   encrypted += cipher.final("base64");
+
+//   return {
+//     encryptedContent: encrypted,
+//     iv: iv.toString("base64"),
+//     authTag: cipher.getAuthTag().toString("base64"),
+//   };
+// }
+function encryptAESGCMBuffer(plaintext: Buffer, key: Buffer) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
 
-  let encrypted = cipher.update(plaintext, "utf8", "base64");
-  encrypted += cipher.final("base64");
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext),
+    cipher.final(),
+  ]);
 
   return {
-    encryptedContent: encrypted,
+    encrypted: encrypted.toString("base64"),
     iv: iv.toString("base64"),
     authTag: cipher.getAuthTag().toString("base64"),
   };
 }
-function decryptAESGCM(
-  encrypted: string,
+// function decryptAESGCM(
+//   encrypted: string,
+//   key: Buffer,
+//   ivBase64: string,
+//   authTagBase64: string
+// ): string {
+//   const iv = Buffer.from(ivBase64, "base64");
+//   const authTag = Buffer.from(authTagBase64, "base64");
+
+//   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+//   decipher.setAuthTag(authTag);
+
+//   let decrypted = decipher.update(encrypted, "base64", "utf8");
+//   decrypted += decipher.final("utf8");
+
+//   return decrypted;
+// }
+function decryptAESGCMBuffer(
+  encryptedBase64: string,
   key: Buffer,
   ivBase64: string,
   authTagBase64: string
-): string {
-  const iv = Buffer.from(ivBase64, "base64");
-  const authTag = Buffer.from(authTagBase64, "base64");
+): Buffer {
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(ivBase64, "base64")
+  );
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
+  decipher.setAuthTag(Buffer.from(authTagBase64, "base64"));
 
-  let decrypted = decipher.update(encrypted, "base64", "utf8");
-  decrypted += decipher.final("utf8");
-
-  return decrypted;
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedBase64, "base64")),
+    decipher.final(),
+  ]);
 }
 export const createAccount = onRequest(async (req, res) => {
   try {
@@ -103,30 +137,79 @@ export const createAccount = onRequest(async (req, res) => {
     res.status(500).send(e.message);
   }
 });
-export const createSampleDoc = onRequest(async (req, res) => {
-  try {
-    const {uid, secret} = req.body;
-    if (!uid || !secret) {
-      res.status(400).send("Thiếu uid / secret");
-      return;
+// export const createSampleDoc = onRequest(async (req, res) => {
+//   try {
+//     const {uid, secret} = req.body;
+//     if (!uid || !secret) {
+//       res.status(400).send("Thiếu uid / secret");
+//       return;
+//     }
+
+//     // const key = getAESKey(secret, uid);
+//     const key = await getAESKeyAsync(secret, uid);
+
+//     const plaintext = templeDoc;
+//     const encrypted = encryptAESGCM(plaintext, key);
+
+//     await db.collection("documents").doc("nhatkyngaythuhai").set({
+//       ...encrypted,
+//       createdAt: Date.now(),
+//     });
+
+//     res.send("✅ Document đã được mã hoá & lưu");
+//   } catch (e: any) {
+//     res.status(500).send(e.message);
+//   }
+// });
+export const createSampleDoc = onRequest(
+  {secrets: [MASTER_KEY]},
+  async (req, res) => {
+    try {
+      const {uid, text} = req.body;
+      if (!uid) {
+        res.status(400).send("Thiếu uid");
+        return;
+      }
+
+      // 1️⃣ Sinh DEK cho document - random
+      const dek = crypto.randomBytes(32);
+
+      // 2️⃣ Encrypt plaintext bằng DEK
+      const data = encryptAESGCMBuffer(
+        Buffer.from(text, "utf8"),
+        dek
+      );
+
+      // 3️⃣ Encrypt DEK bằng MASTER_KEY
+      const masterKey = Buffer.from(
+        MASTER_KEY.value(),
+        "base64"
+      );
+
+      const dekEncrypted = encryptAESGCMBuffer(dek, masterKey);
+
+      // 4️⃣ Lưu Firestore (đúng schema bạn đã chốt)
+      await db.collection("documents").doc("nhatkyngaythuhai").set({
+        encryptedContent: data.encrypted,
+        iv: data.iv,
+        authTag: data.authTag,
+
+        encryptedDEK: dekEncrypted.encrypted,
+        dekIv: dekEncrypted.iv,
+        dekAuthTag: dekEncrypted.authTag,
+
+        ownerUid: uid,
+        version: 1,
+        createdAt: Date.now(),
+      });
+
+      res.send("✅ Document đã mã hoá theo KEK/DEK");
+    } catch (e: any) {
+      res.status(500).send(e.message);
     }
-
-    // const key = getAESKey(secret, uid);
-    const key = await getAESKeyAsync(secret, uid);
-
-    const plaintext = templeDoc;
-    const encrypted = encryptAESGCM(plaintext, key);
-
-    await db.collection("documents").doc("nhatkyngaythuhai").set({
-      ...encrypted,
-      createdAt: Date.now(),
-    });
-
-    res.send("✅ Document đã được mã hoá & lưu");
-  } catch (e: any) {
-    res.status(500).send(e.message);
   }
-});
+);
+
 export const telegramWebhook = onRequest(
   {secrets: [TELEGRAM_BOT_TOKEN]},
   async (req, res) => {
@@ -134,7 +217,6 @@ export const telegramWebhook = onRequest(
     res.status(200).send("ok");
 
     const message = req.body.message;
-    console.log("update_id:", req.body.update_id);
     if (!message?.text) return;
 
     const chatId = message.chat.id;
@@ -198,7 +280,7 @@ export const telegramWebhook = onRequest(
     await db.collection("viewTokens").doc(token).set({
       uid: userDoc.id,
       docId: "nhatkyngaythuhai",
-      secret,
+      // secret,
       used: false,
       expiresAt: Date.now() + 60000,
     });
@@ -219,72 +301,194 @@ export const telegramWebhook = onRequest(
 // ============================
 // VIEW FUNCTION – 1 LẦN / 1 PHÚT
 // ============================
-export const view = onRequest(async (req, res) => {
-  try {
-    // 🚫 Chặn Telegram / bot preview
-    const ua = String(req.headers["user-agent"] || "");
-    if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
-      res.status(204).end();
-      return;
-    }
+// export const view = onRequest(async (req, res) => {
+//   try {
+//     // 🚫 Chặn Telegram / bot preview
+//     const ua = String(req.headers["user-agent"] || "");
+//     if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
+//       res.status(204).end();
+//       return;
+//     }
 
-    const token = String(req.query.token || "");
-    if (!token) {
-      res.status(400).send("No token");
-      return;
-    }
+//     const token = String(req.query.token || "");
+//     if (!token) {
+//       res.status(400).send("No token");
+//       return;
+//     }
 
-    const ref = db.collection("viewTokens").doc(token);
+//     const ref = db.collection("viewTokens").doc(token);
 
-    let plain = "";
+//     let tokenData: {
+//       uid: string;
+//       docId: string;
+//       secret: string;
+//     } | any = null;
 
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      if (!snap.exists) {
-        throw new Error("TOKEN_NOT_FOUND");
+//     await db.runTransaction(async (tx) => {
+//       const snap = await tx.get(ref);
+//       if (!snap.exists) {
+//         throw new Error("TOKEN_NOT_FOUND");
+//       }
+
+//       const data = snap.data()!;
+//       if (data.used || Date.now() > data.expiresAt) {
+//         throw new Error("TOKEN_EXPIRED");
+//       }
+
+//       // ✅ chỉ copy metadata ra ngoài
+//       tokenData = {
+//         uid: data.uid,
+//         docId: data.docId,
+//         secret: data.secret,
+//       };
+
+//       // const docSnap = await tx.get(
+//       //   db.collection("documents").doc(data.docId)
+//       // );
+
+//       // if (!docSnap.exists) {
+//       //   throw new Error("DOC_NOT_FOUND");
+//       // }
+
+//       // const d = docSnap.data()!;
+
+//       // const key = getAESKey(data.secret, data.uid);
+//       // const key = await getAESKeyAsync(data.secret, data.uid);
+//       // plain = decryptAESGCM(
+//       //   d.encryptedContent,
+//       //   key,
+//       //   d.iv,
+//       //   d.authTag
+//       // );
+
+//       // ✅ Đánh dấu token đã dùng
+//       tx.update(ref, {used: true});
+//     });
+
+//     // ✅ CHECK SAU TRANSACTION
+//     if (!tokenData) {
+//       throw new Error("TOKEN_DATA_MISSING");
+//     }
+
+//     const docSnap = await db
+//       .collection("documents")
+//       .doc(tokenData.docId)
+//       .get();
+
+//     if (!docSnap.exists) {
+//       throw new Error("DOC_NOT_FOUND");
+//     }
+
+//     const d = docSnap.data()!;
+
+//     // 🔐 pbkdf2 (chỉ chạy 1 lần)
+//     const key = await getAESKeyAsync(
+//       tokenData.secret,
+//       tokenData.uid
+//     );
+
+//     // 🔓 decrypt (chỉ chạy 1 lần)
+//     const plain = decryptAESGCM(
+//       d.encryptedContent,
+//       key,
+//       d.iv,
+//       d.authTag
+//     );
+
+//     // ✅ CHỈ SEND RESPONSE 1 LẦN – NGOÀI TRANSACTION
+//     res.setHeader("Content-Type", "text/html; charset=utf-8");
+//     res.send(`
+//       <pre>${plain}</pre>
+//       <script>
+//         setTimeout(() => {
+//           document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
+//         }, 10000);
+//       </script>
+//     `);
+//   } catch (e) {
+//     res.status(403).send("⛔ Token không hợp lệ hoặc đã hết hạn");
+//   }
+// });
+export const view = onRequest(
+  {secrets: [MASTER_KEY]},
+  async (req, res) => {
+    try {
+      // 🚫 Chặn Telegram / bot preview
+      const ua = String(req.headers["user-agent"] || "");
+      if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
+        res.status(204).end();
+        return;
       }
 
-      const data = snap.data()!;
-      if (data.used || Date.now() > data.expiresAt) {
-        throw new Error("TOKEN_EXPIRED");
+      const token = String(req.query.token || "");
+      if (!token) {
+        res.status(400).send("No token");
+        return;
       }
 
-      const docSnap = await tx.get(
-        db.collection("documents").doc(data.docId)
-      );
+      const ref = db.collection("viewTokens").doc(token);
+      let tokenData: { uid: string; docId: string } | any = null;
 
-      if (!docSnap.exists) {
-        throw new Error("DOC_NOT_FOUND");
-      }
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw new Error("TOKEN_NOT_FOUND");
+
+        const data = snap.data()!;
+        if (data.used || Date.now() > data.expiresAt) {
+          throw new Error("TOKEN_EXPIRED");
+        }
+
+        tokenData = {
+          uid: data.uid,
+          docId: data.docId,
+        };
+
+        tx.update(ref, {used: true});
+      });
+
+      if (!tokenData) throw new Error("TOKEN_DATA_MISSING");
+
+      const docSnap = await db
+        .collection("documents")
+        .doc(tokenData.docId)
+        .get();
+
+      if (!docSnap.exists) throw new Error("DOC_NOT_FOUND");
 
       const d = docSnap.data()!;
 
-      // const key = getAESKey(data.secret, data.uid);
-      const key = await getAESKeyAsync(data.secret, data.uid);
-      plain = decryptAESGCM(
-        d.encryptedContent,
-        key,
-        d.iv,
-        d.authTag
+      // 🔑 decrypt DEK
+      const masterKey = Buffer.from(
+        MASTER_KEY.value(),
+        "base64"
       );
 
-      // ✅ Đánh dấu token đã dùng
-      tx.update(ref, {used: true});
-    });
+      const dek = decryptAESGCMBuffer(
+        d.encryptedDEK,
+        masterKey,
+        d.dekIv,
+        d.dekAuthTag
+      );
 
-    console.log("plain: ", plain.length);
-    console.log("templeDoc: ", templeDoc.length);
-    // ✅ CHỈ SEND RESPONSE 1 LẦN – NGOÀI TRANSACTION
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`
-      <pre>${plain}</pre>
-      <script>
-        setTimeout(() => {
-          document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
-        }, 10000);
-      </script>
-    `);
-  } catch (e) {
-    res.status(403).send("⛔ Token không hợp lệ hoặc đã hết hạn");
+      // 🔓 decrypt data
+      const plaintext = decryptAESGCMBuffer(
+        d.encryptedContent,
+        dek,
+        d.iv,
+        d.authTag
+      ).toString("utf8");
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(`
+        <pre>${plaintext}</pre>
+        <script>
+          setTimeout(() => {
+            document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
+          }, 10000);
+        </script>
+        `);
+    } catch {
+      res.status(403).send("⛔ Token không hợp lệ hoặc đã hết hạn");
+    }
   }
-});
+);
