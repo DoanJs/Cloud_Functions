@@ -4,6 +4,8 @@ import {onRequest} from "firebase-functions/v2/https";
 import bcrypt from "bcrypt";
 import * as crypto from "crypto";
 import {defineSecret} from "firebase-functions/params";
+import {onDocumentCreated} from "firebase-functions/firestore";
+import {FieldValue} from "firebase-admin/firestore";
 // import {templeDoc} from "./templeDoc";
 
 setGlobalOptions({region: "asia-southeast1"});
@@ -216,103 +218,230 @@ export const createSampleDoc = onRequest(
   },
 );
 
+// export const telegramWebhook = onRequest(
+//   {secrets: [TELEGRAM_BOT_TOKEN]},
+//   async (req, res) => {
+//     // ⚠️ Telegram cần 200 ngay
+//     res.status(200).send("ok");
+//     const message = req.body.message;
+
+//     if (!message?.text) return;
+
+//     const messageId = message.message_id;
+//     const chatId = message.chat.id;
+//     const text = message.text.trim();
+
+//     const [command, secret] = text.split(/\s+/);
+
+//     if (command !== "/nhatkyngaythuhai" || !secret) {
+//       return sendTelegram(chatId, "❌ Cú pháp: /nhatkyngaythuhai <secret>");
+//     }
+
+//     // 🔎 tìm user
+//     const snap = await db
+//       .collection("users")
+//       .where("telegramChatId", "==", chatId)
+//       .limit(1)
+//       .get();
+
+//     if (snap.empty) {
+//       return sendTelegram(chatId, "⛔ Không xác định người dùng");
+//     }
+
+//     const userDoc = snap.docs[0];
+//     const user = userDoc.data();
+
+//     // 🔐 verify secret
+//     const ok = await bcrypt.compare(secret, user.secretHash);
+//     if (!ok) {
+//       return sendTelegram(chatId, "⛔ Secret không đúng");
+//     }
+
+//     // 📄 lấy document
+//     // const docSnap = await db
+//     //   .collection("documents")
+//     //   .doc("nhatkyngaythuhai")
+//     //   .get();
+
+//     // if (!docSnap.exists) {
+//     //   return sendTelegram(chatId, "❌ Không có dữ liệu");
+//     // }
+
+//     // const d = docSnap.data()!;
+
+//     // // 🔓 decrypt
+//     // const key = getAESKey(secret, userDoc.id);
+//     // const plain = decryptAESGCM(
+//     //   d.encryptedContent,
+//     //   key,
+//     //   d.iv,
+//     //   d.authTag
+//     // );
+
+//     // // 📤 gửi nội dung
+//     // await sendTelegram(
+//     //   chatId,
+//     //   `📓 Nhật ký ngày thứ nhất\n\n${plain}`
+//     // );
+
+//     const token = crypto.randomUUID();
+
+//     await db
+//       .collection("viewTokens")
+//       .doc(token)
+//       .set({
+//         uid: userDoc.id,
+//         docId: "nhatkyngaythuhai",
+//         // secret,
+//         used: false,
+//         expiresAt: Date.now() + 60000,
+//       });
+
+//     const url = `https://asia-southeast1-infojs-c6205.cloudfunctions.net/view?token=${token}`;
+
+//     const data = await sendTelegram(
+//       chatId,
+//       "📓 Nhật ký ngày thứ hai\n" +
+//         "⏱ Link chỉ dùng 1 lần (60s)\n" +
+//         `👉 ${url}`,
+//     );
+
+//     console.log(data);
+
+//     await deleteMessage(chatId, messageId);
+
+//     setTimeout(async () => {
+//       await deleteMessage(chatId, data.result.message_id);
+//     }, 10000);
+//   },
+// );
 export const telegramWebhook = onRequest(
-  {secrets: [TELEGRAM_BOT_TOKEN]},
   async (req, res) => {
-    // ⚠️ Telegram cần 200 ngay
-    res.status(200).send("ok");
     const message = req.body.message;
+
+    // Telegram cần OK ngay
+    res.status(200).send("ok");
 
     if (!message?.text) return;
 
-    const messageId = message.message_id;
-    const chatId = message.chat.id;
     const text = message.text.trim();
-
     const [command, secret] = text.split(/\s+/);
 
-    if (command !== "/nhatkyngaythuhai" || !secret) {
-      return sendTelegram(chatId, "❌ Cú pháp: /nhatkyngaythuhai <secret>");
-    }
+    if (command !== "/nhatkyngaythuhai" || !secret) return;
 
-    // 🔎 tìm user
-    const snap = await db
-      .collection("users")
-      .where("telegramChatId", "==", chatId)
-      .limit(1)
-      .get();
+    await db.collection("processMessages").add({
+      telegram: {
+        chatId: message.chat.id,
+        messageId: message.message_id,
+      },
+      command,
+      secret,
+      status: "pending", // | "processing" | "done" | "error"
+      createdAt: Date.now(),
+    });
+  }
+);
 
-    if (snap.empty) {
-      return sendTelegram(chatId, "⛔ Không xác định người dùng");
-    }
+export const processTelegramMessage = onDocumentCreated(
+  {
+    document: "processMessages/{id}",
+    secrets: [TELEGRAM_BOT_TOKEN],
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
 
-    const userDoc = snap.docs[0];
-    const user = userDoc.data();
+    const ref = snap.ref;
+    const data = snap.data();
 
-    // 🔐 verify secret
-    const ok = await bcrypt.compare(secret, user.secretHash);
-    if (!ok) {
-      return sendTelegram(chatId, "⛔ Secret không đúng");
-    }
+    if (data.status !== "pending") return;
 
-    // 📄 lấy document
-    // const docSnap = await db
-    //   .collection("documents")
-    //   .doc("nhatkyngaythuhai")
-    //   .get();
+    // 🔒 lock
+    await ref.update({
+      status: "processing",
+      processingAt: Date.now(),
+    });
 
-    // if (!docSnap.exists) {
-    //   return sendTelegram(chatId, "❌ Không có dữ liệu");
-    // }
+    const {chatId, messageId} = data.telegram;
+    const {secret} = data;
 
-    // const d = docSnap.data()!;
+    try {
+      // 🔎 tìm user
+      const userSnap = await db
+        .collection("users")
+        .where("telegramChatId", "==", chatId)
+        .limit(1)
+        .get();
 
-    // // 🔓 decrypt
-    // const key = getAESKey(secret, userDoc.id);
-    // const plain = decryptAESGCM(
-    //   d.encryptedContent,
-    //   key,
-    //   d.iv,
-    //   d.authTag
-    // );
+      if (userSnap.empty) {
+        await sendTelegram(chatId, "⛔ Không xác định người dùng");
+        return;
+      }
 
-    // // 📤 gửi nội dung
-    // await sendTelegram(
-    //   chatId,
-    //   `📓 Nhật ký ngày thứ nhất\n\n${plain}`
-    // );
+      const userDoc = userSnap.docs[0];
+      const user = userDoc.data();
 
-    const token = crypto.randomUUID();
+      // 🔐 verify secret
+      const ok = await bcrypt.compare(secret, user.secretHash);
+      if (!ok) {
+        await sendTelegram(chatId, "⛔ Secret không đúng");
+        return;
+      }
 
-    await db
-      .collection("viewTokens")
-      .doc(token)
-      .set({
-        uid: userDoc.id,
-        docId: "nhatkyngaythuhai",
-        // secret,
-        used: false,
-        expiresAt: Date.now() + 60000,
+      // secret hợp lệ → xóa NGAY
+      await ref.update({
+        secret: FieldValue.delete(),
       });
 
-    const url = `https://asia-southeast1-infojs-c6205.cloudfunctions.net/view?token=${token}`;
+      // 🎟 tạo token
+      const token = crypto.randomUUID();
+      await db.collection("viewTokens").doc(token).set({
+        uid: userDoc.id,
+        docId: "nhatkyngaythuhai",
+        used: false,
+        expiresAt: Date.now() + 60_000,
+      });
 
-    const data = await sendTelegram(
-      chatId,
-      "📓 Nhật ký ngày thứ hai\n" +
-        "⏱ Link chỉ dùng 1 lần (60s)\n" +
-        `👉 ${url}`,
-    );
+      const url =
+        "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
+        `?token=${token}`;
 
-    console.log(data);
+      const botReply = await sendTelegram(
+        chatId,
+        "📓 Nhật ký ngày thứ hai\n" +
+          "⏱ Link chỉ dùng 1 lần (60s)\n" +
+          `👉 ${url}`
+      );
 
-    await deleteMessage(chatId, messageId);
+      // 🧹 xoá message gốc
+      await deleteMessage(chatId, messageId);
 
-    setTimeout(async () => {
-      await deleteMessage(chatId, data.result.message_id);
-    }, 10000);
-  },
+      // ⛔ nếu Telegram không trả result → dừng
+      const botMessageId = botReply?.result?.message_id;
+
+      if (botMessageId) {
+        // 🧹 auto xoá message bot
+        setTimeout(async () => {
+          await deleteMessage(chatId, botMessageId);
+        }, 10_000);
+      }
+
+      await ref.update({
+        status: "done",
+        botReplyMessageId: botReply.result.message_id,
+        finishedAt: Date.now(),
+      });
+    } catch (err: any) {
+      console.error(err);
+      await ref.update({
+        status: "error",
+        error: err.message,
+        finishedAt: Date.now(),
+      });
+    }
+  }
 );
+
 
 // ---------------------------------------------------
 // ============================
@@ -428,7 +557,7 @@ export const telegramWebhook = onRequest(
 // });
 export const view = onRequest({secrets: [MASTER_KEY]}, async (req, res) => {
   try {
-    // 🚫 Chặn Telegram / bot preview
+    // 🚫 Chặn Telegram / bot preview tự mở trước
     const ua = String(req.headers["user-agent"] || "");
     if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
       res.status(204).end();
@@ -493,7 +622,7 @@ export const view = onRequest({secrets: [MASTER_KEY]}, async (req, res) => {
         <script>
           setTimeout(() => {
             document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
-          }, 10000);
+          }, 10_000);
         </script>
         `);
   } catch {
