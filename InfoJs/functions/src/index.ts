@@ -4,6 +4,7 @@ import * as admin from "firebase-admin";
 import {defineSecret} from "firebase-functions/params";
 import {onRequest} from "firebase-functions/v2/https";
 import {setGlobalOptions} from "firebase-functions/v2/options";
+import {onDocumentCreated} from "firebase-functions/v2/firestore";
 import {templeDoc} from "./templeDoc";
 
 setGlobalOptions({region: "asia-southeast1"});
@@ -90,7 +91,7 @@ export const createSampleDoc = onRequest(async (req, res) => {
     ]);
     const authTag = cipher.getAuthTag();
 
-    await db.collection("documents").doc("nhatkyngaythuhai").set({
+    await db.collection("doituongs").add({
       encryptedContent: encrypted.toString("base64"),
       iv: iv.toString("base64"),
       salt: salt.toString("base64"),
@@ -98,21 +99,23 @@ export const createSampleDoc = onRequest(async (req, res) => {
       ownerUid: uid,
       version: 1,
       createdAt: Date.now(),
+
+      slugName: slugify("Nguyễn Văn An"),
+      name: "Nguyễn Văn An",
+      address: "K123 Nguyễn Hoàng, Đà Nẵng",
     });
+
 
     res.send("✅ Sample document đã tạo (E2EE-ready)");
   } catch (e: any) {
     res.status(500).send(e.message);
   }
 });
+
+// ----------------TELEGRAM BOT------------------------------
+
 export const telegramWebhook = onRequest(async (req, res) => {
   const msg = req.body.message;
-
-  // ⚠️ BẮT BUỘC trả OK ngay
-  res.status(200).send("ok");
-
-  if (!msg?.text) return;
-  if (msg.text.trim() !== "/nhatkyngaythuhai") return;
 
   await db.collection("processMessages").add({
     chatId: msg.chat.id,
@@ -120,20 +123,167 @@ export const telegramWebhook = onRequest(async (req, res) => {
     text: msg.text,
     createdAt: Date.now(),
   });
-});
-import {onDocumentCreated} from "firebase-functions/v2/firestore";
 
+  res.status(200).send("ok");
+});
+
+function slugify(str: string) {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .toLowerCase()
+    .replace(/^_+|_+$/g, "");
+}
+
+
+// export const onProcessMessageCreated = onDocumentCreated(
+//   {
+//     document: "processMessages/{id}",
+//     secrets: [TELEGRAM_BOT_TOKEN], // 🔥 BẮT BUỘC
+//   },
+//   async (event) => {
+//     const data = event.data?.data();
+//     if (!data) return;
+
+//     const {chatId, messageId, text} = data;
+//     // 🔎 lookup user theo telegramChatId
+//     const userSnap = await db
+//       .collection("users")
+//       .where("telegramChatId", "==", chatId)
+//       .limit(1)
+//       .get();
+
+//     if (userSnap.empty) {
+//       await sendTelegram(chatId, "⛔ Không xác định người dùng");
+//       return;
+//     }
+
+//     const userDoc = userSnap.docs[0];
+//     const ownerUid = userDoc.id;
+
+//     const raw = (text || "").trim();
+//     const [cmd] = raw.split(/\s+/, 1);
+
+//     if (cmd.toLowerCase() === "/help") {
+//       await sendTelegram(
+//         chatId,
+//         "📌 Các lệnh hỗ trợ:\n" +
+//         "/doituong <tên>"
+//       );
+//       return;
+//     }
+
+//     if (text.startsWith("/chondoituong_")) {
+//       // Ví dụ text: "/chondoituong_con-meo 8fH2kL9X"
+
+//       const match = text.match(/^\/chondoituong_([\w-]+)\s+(.+)$/);
+
+//       if (!match) {
+//         await sendTelegram(chatId, "❌ Cú pháp không hợp lệ.");
+//         return;
+//       }
+
+//       // const slugName = match[1]; // con-meo
+//       const objectId = match[2]; // 8fH2kL9X
+
+//       // 🔐 create view token
+//       const token = crypto.randomUUID();
+
+//       await db.collection("viewTokens").doc(token).set({
+//         ownerUid,
+//         docId: objectId,
+//         used: false,
+//         expiresAt: Date.now() + 60_000,
+//         createdAt: Date.now(),
+//       });
+
+//       const url =
+//         "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
+//         `?token=${token}`;
+
+//       // 📤 send telegram
+//       const botReply = await sendTelegram(
+//         chatId,
+//         "📓 Thông tin đối tượng:\n" +
+//           "⏱ Link dùng 1 lần (60s)\n" +
+//           `👉 ${url}`
+//       );
+
+//       // 🧹 xoá message user
+//       await deleteMessage(chatId, messageId);
+
+//       // 🧹 auto xoá message bot
+//       const botMessageId = botReply?.result?.message_id;
+//       if (botMessageId) {
+//         setTimeout(async () => {
+//           await deleteMessage(chatId, botMessageId);
+//         }, 10_000);
+//       }
+//     }
+
+//     if (cmd.toLowerCase() !== "/doituong") {
+//       await sendTelegram(
+//         chatId,
+//         "❌ Không hiểu lệnh\n👉 Gõ /help để xem danh sách lệnh"
+//       );
+//       return;
+//     }
+
+//     const m = raw.match(/^\/doituong\s+(.+)$/i);
+
+//     if (!m) {
+//       await sendTelegram(
+//         chatId,
+//         "❌ Thiếu tên đối tượng\n👉 Ví dụ: /doituong Nguyễn Văn An"
+//       );
+//     }
+
+//     const slugName = m[1].trim();
+//     const name = slugName
+//       .replace(/_/g, " ")
+//       .replace(/\s+/g, " ")
+//       .trim();
+
+//     const snap = await db
+//       .collection("doituongs")
+//       .where("slugName", "==", slugName)
+//       .get();
+
+//     if (snap.empty) {
+//       await sendTelegram(
+//         chatId,
+//         `📭 Không tìm thấy đối tượng: ${name}`
+//       );
+//       return;
+//     }
+
+//     const lines = snap.docs.map((d, i) => {
+//       const data = d.data();
+//       return `${i + 1}.  ${data.name}\n`+
+//       `👉 Chọn: /chondoituong_${data.slugName} ${data.id}`;
+//     });
+
+//     await sendTelegram(
+//       chatId,
+//       "🔎 Tìm thấy các đối tượng sau, chọn 1 đối tượng để tiếp tục:\n\n" +
+//         lines.join("\n")
+//     );
+//   }
+// );
 export const onProcessMessageCreated = onDocumentCreated(
   {
     document: "processMessages/{id}",
-    secrets: [TELEGRAM_BOT_TOKEN], // 🔥 BẮT BUỘC
-    minInstances: 1,
+    secrets: [TELEGRAM_BOT_TOKEN],
   },
   async (event) => {
     const data = event.data?.data();
     if (!data) return;
 
-    const {chatId, messageId} = data;
+    const {chatId, messageId, text} = data;
+    const raw = (text || "").trim();
 
     // 🔎 lookup user theo telegramChatId
     const userSnap = await db
@@ -147,99 +297,114 @@ export const onProcessMessageCreated = onDocumentCreated(
       return;
     }
 
-    const userDoc = userSnap.docs[0];
-    const ownerUid = userDoc.id;
+    const ownerUid = userSnap.docs[0].id;
 
-    // 🔐 create view token
-    const token = crypto.randomUUID();
+    /* =========================
+       /help
+    ========================= */
+    if (/^\/help$/i.test(raw)) {
+      await sendTelegram(
+        chatId,
+        "📌 Các lệnh hỗ trợ:\n" +
+        "/doituong <tên>\n" +
+        "Ví dụ: /doituong Nguyễn Văn An"
+      );
+      return;
+    }
 
-    await db.collection("viewTokens").doc(token).set({
-      ownerUid,
-      docId: "nhatkyngaythuhai",
-      used: false,
-      expiresAt: Date.now() + 60_000,
-      createdAt: Date.now(),
-    });
+    /* =========================
+       /chondoituong_<slug> <id>
+    ========================= */
+    if (raw.startsWith("/chondoituong_")) {
+      const match = raw.match(/^\/chondoituong_([\w-]+)\s+(.+)$/);
+      if (!match) {
+        await sendTelegram(chatId, "❌ Cú pháp không hợp lệ.");
+        return;
+      }
 
-    const url =
-      "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
-      `?token=${token}`;
+      const objectId = match[2];
 
-    // 📤 send telegram
-    const botReply = await sendTelegram(
-      chatId,
-      "📓 Nhật ký ngày thứ hai\n" +
+      // 🔐 create view token
+      const token = crypto.randomUUID();
+
+      await db.collection("viewTokens").doc(token).set({
+        ownerUid,
+        docId: objectId,
+        used: false,
+        expiresAt: Date.now() + 60_000,
+        createdAt: Date.now(),
+      });
+
+      const url =
+        "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
+        `?token=${token}`;
+
+      const botReply = await sendTelegram(
+        chatId,
+        "📓 Thông tin đối tượng:\n" +
         "⏱ Link dùng 1 lần (60s)\n" +
         `👉 ${url}`
-    );
+      );
 
-    // 🧹 xoá message user
-    await deleteMessage(chatId, messageId);
+      // 🧹 xoá message user
+      await deleteMessage(chatId, messageId);
 
-    // 🧹 auto xoá message bot
-    const botMessageId = botReply?.result?.message_id;
-    if (botMessageId) {
-      setTimeout(async () => {
-        await deleteMessage(chatId, botMessageId);
-      }, 10_000);
+      // 🧹 auto xoá message bot
+      const botMessageId = botReply?.result?.message_id;
+      if (botMessageId) {
+        setTimeout(async () => {
+          await deleteMessage(chatId, botMessageId);
+        }, 10_000);
+      }
+
+      return;
     }
+
+    /* =========================
+       /doituong <tên>
+    ========================= */
+    const m = raw.match(/^\/doituong\s+(.+)$/i);
+
+    if (!m) {
+      await sendTelegram(
+        chatId,
+        "❌ Không hiểu lệnh\n👉 Gõ /help để xem danh sách lệnh"
+      );
+      return;
+    }
+
+    const inputName = m[1].trim(); // Nguyễn Văn An
+    const slug = slugify(inputName); // nguyen_van_an
+
+    const snap = await db
+      .collection("doituongs")
+      .where("slugName", "==", slug)
+      .where("ownerUid", "==", ownerUid)
+      .get();
+
+    if (snap.empty) {
+      await sendTelegram(
+        chatId,
+        `📭 Không tìm thấy đối tượng: ${inputName}`
+      );
+      return;
+    }
+
+    const lines = snap.docs.map((d, i) => {
+      const data = d.data();
+      return (
+        `${i + 1}. ${data.name}\n` +
+        `👉 Chọn: /chondoituong_${data.slugName} ${d.id}`
+      );
+    });
+
+    await sendTelegram(
+      chatId,
+      "🔎 Tìm thấy các đối tượng sau, chọn 1 đối tượng để tiếp tục:\n\n" +
+      lines.join("\n\n")
+    );
   }
 );
-
-// export const telegramWebhook = onRequest(async (req, res) => {
-//   const msg = req.body.message;
-//   res.status(200).send("ok");
-
-//   if (!msg?.text) return;
-//   if (msg.text.trim() !== "/nhatkyngaythuhai") return;
-
-//   // 🔎 lookup user theo telegramChatId
-//   const userSnap = await db
-//     .collection("users")
-//     .where("telegramChatId", "==", msg.chat.id)
-//     .limit(1)
-//     .get();
-
-//   if (userSnap.empty) {
-//     await sendTelegram(msg.chat.id, "⛔ Không xác định người dùng");
-//     return;
-//   }
-
-//   const userDoc = userSnap.docs[0];
-//   const ownerUid = userDoc.id;
-
-//   const token = crypto.randomUUID();
-
-//   await db.collection("viewTokens").doc(token).set({
-//     ownerUid,
-//     docId: "nhatkyngaythuhai",
-//     used: false,
-//     expiresAt: Date.now() + 60_000,
-//   });
-
-//   const url =
-//     "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
-//     `?token=${token}`;
-
-//   const botReply = await sendTelegram(
-//     msg.chat.id,
-//     "📓 Nhật ký ngày thứ hai\n" +
-//       "⏱ Link dùng 1 lần (60s)\n" +
-//       `👉 ${url}`
-//   );
-
-//   await deleteMessage(msg.chat.id, msg.message_id);
-
-//   // ⛔ nếu Telegram không trả result → dừng
-//   const botMessageId = botReply?.result?.message_id;
-
-//   if (botMessageId) {
-//     // 🧹 auto xoá message bot
-//     setTimeout(async () => {
-//       await deleteMessage(msg.chat.id, botMessageId);
-//     }, 10_000);
-//   }
-// });
 
 export const view = onRequest(async (req, res) => {
   try {
@@ -268,12 +433,16 @@ export const view = onRequest(async (req, res) => {
     });
 
     const docSnap = await db
-      .collection("documents")
+      .collection("doituongs")
       .doc(tokenData.docId)
       .get();
 
     if (!docSnap.exists) throw new Error();
     const d = docSnap.data()!;
+
+    if (!d.encryptedContent || !d.iv || !d.salt || !d.authTag) {
+      throw new Error();
+    }
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(`<!doctype html>
