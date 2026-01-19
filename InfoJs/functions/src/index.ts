@@ -1,18 +1,15 @@
-import * as admin from "firebase-admin";
-import {setGlobalOptions} from "firebase-functions/v2/options";
-import {onRequest} from "firebase-functions/v2/https";
 import bcrypt from "bcrypt";
 import * as crypto from "crypto";
+import * as admin from "firebase-admin";
 import {defineSecret} from "firebase-functions/params";
-import {onDocumentCreated} from "firebase-functions/firestore";
-import {FieldValue} from "firebase-admin/firestore";
-// import {templeDoc} from "./templeDoc";
+import {onRequest} from "firebase-functions/v2/https";
+import {setGlobalOptions} from "firebase-functions/v2/options";
+import {templeDoc} from "./templeDoc";
 
 setGlobalOptions({region: "asia-southeast1"});
 admin.initializeApp();
 const db = admin.firestore();
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
-const MASTER_KEY = defineSecret("MASTER_KEY"); // base64, 32 bytes
 
 async function sendTelegram(chatId: number, text: string) {
   const res = await fetch(
@@ -38,85 +35,6 @@ async function deleteMessage(chatId: number, messageId: number) {
       }),
     },
   );
-}
-// function getAESKey(secret: string, uid: string): Buffer {
-//   return crypto.pbkdf2Sync(secret, uid, 100_000, 32, "sha256");
-// }
-// function getAESKeyAsync(secret: string, uid: string): Promise<Buffer> {
-//   return new Promise((resolve, reject) => {
-//     crypto.pbkdf2(
-//       secret,
-//       uid,
-//       100_000,
-//       32,
-//       "sha256",
-//       (err, key) => {
-//         if (err) reject(err);
-//         else resolve(key);
-//       }
-//     );
-//   });
-// }
-// function encryptAESGCM(plaintext: string, key: Buffer) {
-//   const iv = crypto.randomBytes(12);
-//   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-
-//   let encrypted = cipher.update(plaintext, "utf8", "base64");
-//   encrypted += cipher.final("base64");
-
-//   return {
-//     encryptedContent: encrypted,
-//     iv: iv.toString("base64"),
-//     authTag: cipher.getAuthTag().toString("base64"),
-//   };
-// }
-function encryptAESGCMBuffer(plaintext: Buffer, key: Buffer) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-
-  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-
-  return {
-    encrypted: encrypted.toString("base64"),
-    iv: iv.toString("base64"),
-    authTag: cipher.getAuthTag().toString("base64"),
-  };
-}
-// function decryptAESGCM(
-//   encrypted: string,
-//   key: Buffer,
-//   ivBase64: string,
-//   authTagBase64: string
-// ): string {
-//   const iv = Buffer.from(ivBase64, "base64");
-//   const authTag = Buffer.from(authTagBase64, "base64");
-
-//   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-//   decipher.setAuthTag(authTag);
-
-//   let decrypted = decipher.update(encrypted, "base64", "utf8");
-//   decrypted += decipher.final("utf8");
-
-//   return decrypted;
-// }
-function decryptAESGCMBuffer(
-  encryptedBase64: string,
-  key: Buffer,
-  ivBase64: string,
-  authTagBase64: string,
-): Buffer {
-  const decipher = crypto.createDecipheriv(
-    "aes-256-gcm",
-    key,
-    Buffer.from(ivBase64, "base64"),
-  );
-
-  decipher.setAuthTag(Buffer.from(authTagBase64, "base64"));
-
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedBase64, "base64")),
-    decipher.final(),
-  ]);
 }
 export const createAccount = onRequest(async (req, res) => {
   try {
@@ -151,413 +69,181 @@ export const createAccount = onRequest(async (req, res) => {
     res.status(500).send(e.message);
   }
 });
-// export const createSampleDoc = onRequest(async (req, res) => {
-//   try {
-//     const {uid, secret} = req.body;
-//     if (!uid || !secret) {
-//       res.status(400).send("Thiếu uid / secret");
-//       return;
-//     }
 
-//     // const key = getAESKey(secret, uid);
-//     const key = await getAESKeyAsync(secret, uid);
-
-//     const plaintext = templeDoc;
-//     const encrypted = encryptAESGCM(plaintext, key);
-
-//     await db.collection("documents").doc("nhatkyngaythuhai").set({
-//       ...encrypted,
-//       createdAt: Date.now(),
-//     });
-
-//     res.send("✅ Document đã được mã hoá & lưu");
-//   } catch (e: any) {
-//     res.status(500).send(e.message);
-//   }
-// });
-export const createSampleDoc = onRequest(
-  {secrets: [MASTER_KEY]},
-  async (req, res) => {
-    try {
-      const {uid, text} = req.body;
-      if (!uid) {
-        res.status(400).send("Thiếu uid");
-        return;
-      }
-
-      // 1️⃣ Sinh DEK cho document - random
-      const dek = crypto.randomBytes(32);
-
-      // 2️⃣ Encrypt plaintext bằng DEK
-      const data = encryptAESGCMBuffer(Buffer.from(text, "utf8"), dek);
-
-      // 3️⃣ Encrypt DEK bằng MASTER_KEY
-      const masterKey = Buffer.from(MASTER_KEY.value(), "base64");
-
-      const dekEncrypted = encryptAESGCMBuffer(dek, masterKey);
-
-      // 4️⃣ Lưu Firestore (đúng schema bạn đã chốt)
-      await db.collection("documents").doc("nhatkyngaythuhai").set({
-        encryptedContent: data.encrypted,
-        iv: data.iv,
-        authTag: data.authTag,
-
-        encryptedDEK: dekEncrypted.encrypted,
-        dekIv: dekEncrypted.iv,
-        dekAuthTag: dekEncrypted.authTag,
-
-        ownerUid: uid,
-        version: 1,
-        createdAt: Date.now(),
-      });
-
-      res.send("✅ Document đã mã hoá theo KEK/DEK");
-    } catch (e: any) {
-      res.status(500).send(e.message);
+export const createSampleDoc = onRequest(async (req, res) => {
+  try {
+    const {uid, secret} = req.body;
+    if (!uid || !secret) {
+      res.status(400).send("Thiếu uid / secret");
+      return;
     }
-  },
-);
 
-// export const telegramWebhook = onRequest(
-//   {secrets: [TELEGRAM_BOT_TOKEN]},
-//   async (req, res) => {
-//     // ⚠️ Telegram cần 200 ngay
-//     res.status(200).send("ok");
-//     const message = req.body.message;
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12);
 
-//     if (!message?.text) return;
+    const key = crypto.pbkdf2Sync(secret, salt, 150_000, 32, "sha256");
 
-//     const messageId = message.message_id;
-//     const chatId = message.chat.id;
-//     const text = message.text.trim();
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const encrypted = Buffer.concat([
+      cipher.update(templeDoc, "utf8"),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
 
-//     const [command, secret] = text.split(/\s+/);
-
-//     if (command !== "/nhatkyngaythuhai" || !secret) {
-//       return sendTelegram(chatId, "❌ Cú pháp: /nhatkyngaythuhai <secret>");
-//     }
-
-//     // 🔎 tìm user
-//     const snap = await db
-//       .collection("users")
-//       .where("telegramChatId", "==", chatId)
-//       .limit(1)
-//       .get();
-
-//     if (snap.empty) {
-//       return sendTelegram(chatId, "⛔ Không xác định người dùng");
-//     }
-
-//     const userDoc = snap.docs[0];
-//     const user = userDoc.data();
-
-//     // 🔐 verify secret
-//     const ok = await bcrypt.compare(secret, user.secretHash);
-//     if (!ok) {
-//       return sendTelegram(chatId, "⛔ Secret không đúng");
-//     }
-
-//     // 📄 lấy document
-//     // const docSnap = await db
-//     //   .collection("documents")
-//     //   .doc("nhatkyngaythuhai")
-//     //   .get();
-
-//     // if (!docSnap.exists) {
-//     //   return sendTelegram(chatId, "❌ Không có dữ liệu");
-//     // }
-
-//     // const d = docSnap.data()!;
-
-//     // // 🔓 decrypt
-//     // const key = getAESKey(secret, userDoc.id);
-//     // const plain = decryptAESGCM(
-//     //   d.encryptedContent,
-//     //   key,
-//     //   d.iv,
-//     //   d.authTag
-//     // );
-
-//     // // 📤 gửi nội dung
-//     // await sendTelegram(
-//     //   chatId,
-//     //   `📓 Nhật ký ngày thứ nhất\n\n${plain}`
-//     // );
-
-//     const token = crypto.randomUUID();
-
-//     await db
-//       .collection("viewTokens")
-//       .doc(token)
-//       .set({
-//         uid: userDoc.id,
-//         docId: "nhatkyngaythuhai",
-//         // secret,
-//         used: false,
-//         expiresAt: Date.now() + 60000,
-//       });
-
-//     const url = `https://asia-southeast1-infojs-c6205.cloudfunctions.net/view?token=${token}`;
-
-//     const data = await sendTelegram(
-//       chatId,
-//       "📓 Nhật ký ngày thứ hai\n" +
-//         "⏱ Link chỉ dùng 1 lần (60s)\n" +
-//         `👉 ${url}`,
-//     );
-
-//     console.log(data);
-
-//     await deleteMessage(chatId, messageId);
-
-//     setTimeout(async () => {
-//       await deleteMessage(chatId, data.result.message_id);
-//     }, 10000);
-//   },
-// );
-export const telegramWebhook = onRequest(
-  async (req, res) => {
-    const message = req.body.message;
-
-    // Telegram cần OK ngay
-    res.status(200).send("ok");
-
-    if (!message?.text) return;
-
-    const text = message.text.trim();
-    const [command, secret] = text.split(/\s+/);
-
-    if (command !== "/nhatkyngaythuhai" || !secret) return;
-
-    await db.collection("processMessages").add({
-      telegram: {
-        chatId: message.chat.id,
-        messageId: message.message_id,
-      },
-      command,
-      secret,
-      status: "pending", // | "processing" | "done" | "error"
+    await db.collection("documents").doc("nhatkyngaythuhai").set({
+      encryptedContent: encrypted.toString("base64"),
+      iv: iv.toString("base64"),
+      salt: salt.toString("base64"),
+      authTag: authTag.toString("base64"),
+      ownerUid: uid,
+      version: 1,
       createdAt: Date.now(),
     });
-  }
-);
 
-export const processTelegramMessage = onDocumentCreated(
+    res.send("✅ Sample document đã tạo (E2EE-ready)");
+  } catch (e: any) {
+    res.status(500).send(e.message);
+  }
+});
+export const telegramWebhook = onRequest(async (req, res) => {
+  const msg = req.body.message;
+
+  // ⚠️ BẮT BUỘC trả OK ngay
+  res.status(200).send("ok");
+
+  if (!msg?.text) return;
+  if (msg.text.trim() !== "/nhatkyngaythuhai") return;
+
+  await db.collection("processMessages").add({
+    chatId: msg.chat.id,
+    messageId: msg.message_id,
+    text: msg.text,
+    createdAt: Date.now(),
+  });
+});
+import {onDocumentCreated} from "firebase-functions/v2/firestore";
+
+export const onProcessMessageCreated = onDocumentCreated(
   {
     document: "processMessages/{id}",
-    secrets: [TELEGRAM_BOT_TOKEN],
+    secrets: [TELEGRAM_BOT_TOKEN], // 🔥 BẮT BUỘC
+    minInstances: 1,
   },
   async (event) => {
-    const snap = event.data;
-    if (!snap) return;
+    const data = event.data?.data();
+    if (!data) return;
 
-    const ref = snap.ref;
-    const data = snap.data();
+    const {chatId, messageId} = data;
 
-    if (data.status !== "pending") return;
+    // 🔎 lookup user theo telegramChatId
+    const userSnap = await db
+      .collection("users")
+      .where("telegramChatId", "==", chatId)
+      .limit(1)
+      .get();
 
-    // 🔒 lock
-    await ref.update({
-      status: "processing",
-      processingAt: Date.now(),
+    if (userSnap.empty) {
+      await sendTelegram(chatId, "⛔ Không xác định người dùng");
+      return;
+    }
+
+    const userDoc = userSnap.docs[0];
+    const ownerUid = userDoc.id;
+
+    // 🔐 create view token
+    const token = crypto.randomUUID();
+
+    await db.collection("viewTokens").doc(token).set({
+      ownerUid,
+      docId: "nhatkyngaythuhai",
+      used: false,
+      expiresAt: Date.now() + 60_000,
+      createdAt: Date.now(),
     });
 
-    const {chatId, messageId} = data.telegram;
-    const {secret} = data;
+    const url =
+      "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
+      `?token=${token}`;
 
-    try {
-      // 🔎 tìm user
-      const userSnap = await db
-        .collection("users")
-        .where("telegramChatId", "==", chatId)
-        .limit(1)
-        .get();
+    // 📤 send telegram
+    const botReply = await sendTelegram(
+      chatId,
+      "📓 Nhật ký ngày thứ hai\n" +
+        "⏱ Link dùng 1 lần (60s)\n" +
+        `👉 ${url}`
+    );
 
-      if (userSnap.empty) {
-        await sendTelegram(chatId, "⛔ Không xác định người dùng");
-        return;
-      }
+    // 🧹 xoá message user
+    await deleteMessage(chatId, messageId);
 
-      const userDoc = userSnap.docs[0];
-      const user = userDoc.data();
-
-      // 🔐 verify secret
-      const ok = await bcrypt.compare(secret, user.secretHash);
-      if (!ok) {
-        await sendTelegram(chatId, "⛔ Secret không đúng");
-        return;
-      }
-
-      // secret hợp lệ → xóa NGAY
-      await ref.update({
-        secret: FieldValue.delete(),
-      });
-
-      // 🎟 tạo token
-      const token = crypto.randomUUID();
-      await db.collection("viewTokens").doc(token).set({
-        uid: userDoc.id,
-        docId: "nhatkyngaythuhai",
-        used: false,
-        expiresAt: Date.now() + 60_000,
-      });
-
-      const url =
-        "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
-        `?token=${token}`;
-
-      const botReply = await sendTelegram(
-        chatId,
-        "📓 Nhật ký ngày thứ hai\n" +
-          "⏱ Link chỉ dùng 1 lần (60s)\n" +
-          `👉 ${url}`
-      );
-
-      // 🧹 xoá message gốc
-      await deleteMessage(chatId, messageId);
-
-      // ⛔ nếu Telegram không trả result → dừng
-      const botMessageId = botReply?.result?.message_id;
-
-      if (botMessageId) {
-        // 🧹 auto xoá message bot
-        setTimeout(async () => {
-          await deleteMessage(chatId, botMessageId);
-        }, 10_000);
-      }
-
-      await ref.update({
-        status: "done",
-        botReplyMessageId: botReply.result.message_id,
-        finishedAt: Date.now(),
-      });
-    } catch (err: any) {
-      console.error(err);
-      await ref.update({
-        status: "error",
-        error: err.message,
-        finishedAt: Date.now(),
-      });
+    // 🧹 auto xoá message bot
+    const botMessageId = botReply?.result?.message_id;
+    if (botMessageId) {
+      setTimeout(async () => {
+        await deleteMessage(chatId, botMessageId);
+      }, 10_000);
     }
   }
 );
 
+// export const telegramWebhook = onRequest(async (req, res) => {
+//   const msg = req.body.message;
+//   res.status(200).send("ok");
 
-// ---------------------------------------------------
-// ============================
-// VIEW FUNCTION – 1 LẦN / 1 PHÚT
-// ============================
-// export const view = onRequest(async (req, res) => {
-//   try {
-//     // 🚫 Chặn Telegram / bot preview
-//     const ua = String(req.headers["user-agent"] || "");
-//     if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
-//       res.status(204).end();
-//       return;
-//     }
+//   if (!msg?.text) return;
+//   if (msg.text.trim() !== "/nhatkyngaythuhai") return;
 
-//     const token = String(req.query.token || "");
-//     if (!token) {
-//       res.status(400).send("No token");
-//       return;
-//     }
+//   // 🔎 lookup user theo telegramChatId
+//   const userSnap = await db
+//     .collection("users")
+//     .where("telegramChatId", "==", msg.chat.id)
+//     .limit(1)
+//     .get();
 
-//     const ref = db.collection("viewTokens").doc(token);
+//   if (userSnap.empty) {
+//     await sendTelegram(msg.chat.id, "⛔ Không xác định người dùng");
+//     return;
+//   }
 
-//     let tokenData: {
-//       uid: string;
-//       docId: string;
-//       secret: string;
-//     } | any = null;
+//   const userDoc = userSnap.docs[0];
+//   const ownerUid = userDoc.id;
 
-//     await db.runTransaction(async (tx) => {
-//       const snap = await tx.get(ref);
-//       if (!snap.exists) {
-//         throw new Error("TOKEN_NOT_FOUND");
-//       }
+//   const token = crypto.randomUUID();
 
-//       const data = snap.data()!;
-//       if (data.used || Date.now() > data.expiresAt) {
-//         throw new Error("TOKEN_EXPIRED");
-//       }
+//   await db.collection("viewTokens").doc(token).set({
+//     ownerUid,
+//     docId: "nhatkyngaythuhai",
+//     used: false,
+//     expiresAt: Date.now() + 60_000,
+//   });
 
-//       // ✅ chỉ copy metadata ra ngoài
-//       tokenData = {
-//         uid: data.uid,
-//         docId: data.docId,
-//         secret: data.secret,
-//       };
+//   const url =
+//     "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
+//     `?token=${token}`;
 
-//       // const docSnap = await tx.get(
-//       //   db.collection("documents").doc(data.docId)
-//       // );
+//   const botReply = await sendTelegram(
+//     msg.chat.id,
+//     "📓 Nhật ký ngày thứ hai\n" +
+//       "⏱ Link dùng 1 lần (60s)\n" +
+//       `👉 ${url}`
+//   );
 
-//       // if (!docSnap.exists) {
-//       //   throw new Error("DOC_NOT_FOUND");
-//       // }
+//   await deleteMessage(msg.chat.id, msg.message_id);
 
-//       // const d = docSnap.data()!;
+//   // ⛔ nếu Telegram không trả result → dừng
+//   const botMessageId = botReply?.result?.message_id;
 
-//       // const key = getAESKey(data.secret, data.uid);
-//       // const key = await getAESKeyAsync(data.secret, data.uid);
-//       // plain = decryptAESGCM(
-//       //   d.encryptedContent,
-//       //   key,
-//       //   d.iv,
-//       //   d.authTag
-//       // );
-
-//       // ✅ Đánh dấu token đã dùng
-//       tx.update(ref, {used: true});
-//     });
-
-//     // ✅ CHECK SAU TRANSACTION
-//     if (!tokenData) {
-//       throw new Error("TOKEN_DATA_MISSING");
-//     }
-
-//     const docSnap = await db
-//       .collection("documents")
-//       .doc(tokenData.docId)
-//       .get();
-
-//     if (!docSnap.exists) {
-//       throw new Error("DOC_NOT_FOUND");
-//     }
-
-//     const d = docSnap.data()!;
-
-//     // 🔐 pbkdf2 (chỉ chạy 1 lần)
-//     const key = await getAESKeyAsync(
-//       tokenData.secret,
-//       tokenData.uid
-//     );
-
-//     // 🔓 decrypt (chỉ chạy 1 lần)
-//     const plain = decryptAESGCM(
-//       d.encryptedContent,
-//       key,
-//       d.iv,
-//       d.authTag
-//     );
-
-//     // ✅ CHỈ SEND RESPONSE 1 LẦN – NGOÀI TRANSACTION
-//     res.setHeader("Content-Type", "text/html; charset=utf-8");
-//     res.send(`
-//       <pre>${plain}</pre>
-//       <script>
-//         setTimeout(() => {
-//           document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
-//         }, 10000);
-//       </script>
-//     `);
-//   } catch (e) {
-//     res.status(403).send("⛔ Token không hợp lệ hoặc đã hết hạn");
+//   if (botMessageId) {
+//     // 🧹 auto xoá message bot
+//     setTimeout(async () => {
+//       await deleteMessage(msg.chat.id, botMessageId);
+//     }, 10_000);
 //   }
 // });
-export const view = onRequest({secrets: [MASTER_KEY]}, async (req, res) => {
+
+export const view = onRequest(async (req, res) => {
   try {
-    // 🚫 Chặn Telegram / bot preview tự mở trước
+    // 🚫 chặn Telegram preview
     const ua = String(req.headers["user-agent"] || "");
     if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
       res.status(204).end();
@@ -565,67 +251,100 @@ export const view = onRequest({secrets: [MASTER_KEY]}, async (req, res) => {
     }
 
     const token = String(req.query.token || "");
-    if (!token) {
-      res.status(400).send("No token");
-      return;
-    }
+    if (!token) throw new Error();
 
     const ref = db.collection("viewTokens").doc(token);
-    let tokenData: { uid: string; docId: string } | any = null;
+    let tokenData: any;
 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
-      if (!snap.exists) throw new Error("TOKEN_NOT_FOUND");
+      if (!snap.exists) throw new Error();
 
-      const data = snap.data()!;
-      if (data.used || Date.now() > data.expiresAt) {
-        throw new Error("TOKEN_EXPIRED");
-      }
+      const d = snap.data()!;
+      if (d.used || Date.now() > d.expiresAt) throw new Error();
 
-      tokenData = {
-        uid: data.uid,
-        docId: data.docId,
-      };
-
+      tokenData = d;
       tx.update(ref, {used: true});
     });
 
-    if (!tokenData) throw new Error("TOKEN_DATA_MISSING");
+    const docSnap = await db
+      .collection("documents")
+      .doc(tokenData.docId)
+      .get();
 
-    const docSnap = await db.collection("documents").doc(tokenData.docId).get();
-
-    if (!docSnap.exists) throw new Error("DOC_NOT_FOUND");
-
+    if (!docSnap.exists) throw new Error();
     const d = docSnap.data()!;
 
-    // 🔑 decrypt DEK
-    const masterKey = Buffer.from(MASTER_KEY.value(), "base64");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!doctype html>
+<html>
+<body>
+<h3>🔐 Nhập secret để giải mã</h3>
+<input type="password" id="secret"/>
+<button onclick="decrypt()">Giải mã</button>
+<pre id="out"></pre>
 
-    const dek = decryptAESGCMBuffer(
-      d.encryptedDEK,
-      masterKey,
-      d.dekIv,
-      d.dekAuthTag,
+<script>
+const ENCRYPTED = "${d.encryptedContent}";
+const IV = "${d.iv}";
+const SALT = "${d.salt}";
+const AUTH_TAG = "${d.authTag}";
+
+function b64(b){return Uint8Array.from(atob(b),c=>c.charCodeAt(0));}
+
+let attempts = 0;
+
+async function decrypt(){
+  try{
+    if(++attempts > 5){
+      document.body.innerHTML = "⛔ Quá số lần thử";
+      return;
+    }
+
+    const secret = document.getElementById("secret").value;
+    const enc = new TextEncoder();
+
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]
     );
 
-    // 🔓 decrypt data
-    const plaintext = decryptAESGCMBuffer(
-      d.encryptedContent,
-      dek,
-      d.iv,
-      d.authTag,
-    ).toString("utf8");
+    const key = await crypto.subtle.deriveKey(
+      {
+        name:"PBKDF2",
+        salt:b64(SALT),
+        iterations:150000,
+        hash:"SHA-256"
+      },
+      keyMaterial,
+      {name:"AES-GCM",length:256},
+      false,
+      ["decrypt"]
+    );
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`
-        <pre>${plaintext}</pre>
-        <script>
-          setTimeout(() => {
-            document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
-          }, 10_000);
-        </script>
-        `);
+    const cipher = b64(ENCRYPTED);
+    const tag = b64(AUTH_TAG);
+    const combined = new Uint8Array(cipher.length + tag.length);
+    combined.set(cipher);
+    combined.set(tag, cipher.length);
+
+    const plaintext = await crypto.subtle.decrypt(
+      {name:"AES-GCM", iv:b64(IV), tagLength:128},
+      key,
+      combined
+    );
+
+    document.getElementById("out").textContent =
+      new TextDecoder().decode(plaintext);
+
+    setTimeout(()=>document.body.innerHTML="⛔ Nội dung đã bị huỷ",10000);
+  }catch{
+    alert("❌ Secret sai");
+  }
+}
+</script>
+</body>
+</html>`);
   } catch {
-    res.status(403).send("⛔ Token không hợp lệ hoặc đã hết hạn");
+    res.status(403).send("⛔ Token không hợp lệ");
   }
 });
