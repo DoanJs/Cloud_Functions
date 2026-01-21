@@ -37,16 +37,6 @@ async function deleteMessage(chatId: number, messageId: number) {
     },
   );
 }
-// const slugify = (str: string) => {
-//   return str
-//     .normalize("NFD")
-//     .replace(/[\u0300-\u036f]/g, "")
-//     .replace(/đ/g, "d")
-//     .replace(/Đ/g, "D")
-//     .replace(/[^a-zA-Z0-9]+/g, "_")
-//     .toLowerCase()
-//     .replace(/^_+|_+$/g, "");
-// };
 const normalizeVN = (str: string): string => {
   return str
     .toLowerCase()
@@ -67,7 +57,6 @@ const buildSlugAndTokens = (input: string) => {
     tokens: parts, // ["nguyen", "van", "an"]
   };
 };
-
 export const createAccount = onRequest(async (req, res) => {
   try {
     const {email, password, displayName, telegramChatId} = req.body;
@@ -102,54 +91,20 @@ export const createAccount = onRequest(async (req, res) => {
   }
 });
 
-// export const createSampleDoc = onRequest(async (req, res) => {
-//   try {
-//     const {uid, secret, name, address, plaintext} = req.body;
-//     if (!uid || !secret || !name || !address || !plaintext) {
-//       res.status(400).send(
-// "Thiếu uid / secret / name / address / plaintext");
-//       return;
-//     }
-
-//     const salt = crypto.randomBytes(16);
-//     const iv = crypto.randomBytes(12);
-
-//     const key = crypto.pbkdf2Sync(secret, salt, 150_000, 32, "sha256");
-
-//     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-//     const encrypted = Buffer.concat([
-//       cipher.update(plaintext, "utf8"),
-//       cipher.final(),
-//     ]);
-//     const authTag = cipher.getAuthTag();
-//     const dataName = buildSlugAndTokens(name);
-
-//     await db.collection("doituongs").add({
-//       encryptedContent: encrypted.toString("base64"),
-//       iv: iv.toString("base64"),
-//       salt: salt.toString("base64"),
-//       authTag: authTag.toString("base64"),
-//       version: 1,
-//       createdAt: Date.now(),
-
-//       slugName: dataName.slugName,
-//       name,
-//       address,
-//       tokens: dataName.tokens,
-
-//       ownerUid: uid,
-//       shareWith: [],
-//       public: false,
-//     });
-
-
-//     res.send("✅ Sample document đã tạo (E2EE-ready)");
-//   } catch (e: any) {
-//     res.status(500).send(e.message);
-//   }
-// });
-
 // ----------------TELEGRAM BOT------------------------------
+export const telegramWebhook = onRequest(async (req, res) => {
+  const msg = req.body.message;
+
+  await db.collection("processMessages").add({
+    chatId: msg.chat.id,
+    messageId: msg.message_id,
+    text: msg.text,
+    createdAt: Date.now(),
+  });
+
+  res.status(200).send("ok");
+});
+
 export const createSampleDoc = onRequest(async (req, res) => {
   try {
     const {uid, secret, name, address, plaintext} = req.body;
@@ -248,19 +203,6 @@ export const createSampleDoc = onRequest(async (req, res) => {
   }
 });
 
-export const telegramWebhook = onRequest(async (req, res) => {
-  const msg = req.body.message;
-
-  await db.collection("processMessages").add({
-    chatId: msg.chat.id,
-    messageId: msg.message_id,
-    text: msg.text,
-    createdAt: Date.now(),
-  });
-
-  res.status(200).send("ok");
-});
-
 export const onProcessMessageCreated = onDocumentCreated(
   {
     document: "processMessages/{id}",
@@ -300,7 +242,7 @@ export const onProcessMessageCreated = onDocumentCreated(
     }
 
     /* =========================
-       /chondoituong_<slug> <id>
+       /chondoituong_<id>
     ========================= */
     if (raw.startsWith("/chondoituong_")) {
       const match = raw.match(/^\/chondoituong_([\w-]+)$/);
@@ -423,6 +365,7 @@ export const onProcessMessageCreated = onDocumentCreated(
     }
   }
 );
+
 export const view = onRequest(async (req, res) => {
   try {
     // 🚫 Chặn bot / Telegram preview
@@ -593,115 +536,118 @@ async function decrypt(){
   }
 });
 
+export const rotateKEKForDoiTuongs = onRequest(async (req, res) => {
+  try {
+    const {ownerUid, oldSecret, newSecret} = req.body;
 
-// export const view = onRequest(async (req, res) => {
-//   try {
-//     // 🚫 chặn Telegram preview
-//     const ua = String(req.headers["user-agent"] || "");
-//     if (/TelegramBot|bot|crawler|spider/i.test(ua)) {
-//       res.status(204).end();
-//       return;
-//     }
+    if (!ownerUid || !oldSecret || !newSecret) {
+      res.status(400).send("Thiếu ownerUid / oldSecret / newSecret");
+      return;
+    }
 
-//     const token = String(req.query.token || "");
-//     if (!token) throw new Error();
+    // 🔎 Lấy tất cả doituongs của user
+    const snap = await db
+      .collection("doituongs")
+      .where("ownerUid", "==", ownerUid)
+      .get();
 
-//     const ref = db.collection("viewTokens").doc(token);
-//     let tokenData: any;
+    if (snap.empty) {
+      res.send("ℹ️ Không có document nào để rotate");
+      return;
+    }
 
-//     await db.runTransaction(async (tx) => {
-//       const snap = await tx.get(ref);
-//       if (!snap.exists) throw new Error();
+    let rotated = 0;
+    let failed = 0;
 
-//       const d = snap.data()!;
-//       if (d.used || Date.now() > d.expiresAt) throw new Error();
+    for (const doc of snap.docs) {
+      try {
+        const d = doc.data();
 
-//       tokenData = d;
-//       tx.update(ref, {used: true});
-//     });
+        // =========================
+        // 1️⃣ Derive KEK cũ
+        // =========================
+        const oldSalt = Buffer.from(d.kekSalt, "base64");
+        const oldKek = crypto.pbkdf2Sync(
+          oldSecret,
+          oldSalt,
+          150_000,
+          32,
+          "sha256"
+        );
 
-//     const docSnap = await db
-//       .collection("doituongs")
-//       .doc(tokenData.docId)
-//       .get();
+        // =========================
+        // 2️⃣ Decrypt DEK
+        // =========================
+        const dekIv = Buffer.from(d.kekIv, "base64");
+        const dekAuthTag = Buffer.from(d.dekAuthTag, "base64");
+        const encryptedDEK = Buffer.from(d.encryptedDEK, "base64");
 
-//     if (!docSnap.exists) throw new Error();
-//     const d = docSnap.data()!;
+        const dekDecipher = crypto.createDecipheriv(
+          "aes-256-gcm",
+          oldKek,
+          dekIv
+        );
+        dekDecipher.setAuthTag(dekAuthTag);
 
-//     if (!d.encryptedContent || !d.iv || !d.salt || !d.authTag) {
-//       throw new Error();
-//     }
+        const dek = Buffer.concat([
+          dekDecipher.update(encryptedDEK),
+          dekDecipher.final(),
+        ]);
 
-//     res.setHeader("Content-Type", "text/html; charset=utf-8");
-//     res.send(`<!doctype html>
-// <html>
-// <body>
-// <h3>🔐 Nhập secret để giải mã</h3>
-// <input type="password" id="secret"/>
-// <button onclick="decrypt()">Giải mã</button>
-// <pre id="out"></pre>
+        if (dek.length !== 32) {
+          throw new Error("DEK length invalid");
+        }
 
-// <script>
-// const ENCRYPTED = "${d.encryptedContent}";
-// const IV = "${d.iv}";
-// const SALT = "${d.salt}";
-// const AUTH_TAG = "${d.authTag}";
+        // =========================
+        // 3️⃣ Derive KEK mới
+        // =========================
+        const newSalt = crypto.randomBytes(16);
+        const newKek = crypto.pbkdf2Sync(
+          newSecret,
+          newSalt,
+          150_000,
+          32,
+          "sha256"
+        );
 
-// function b64(b){return Uint8Array.from(atob(b),c=>c.charCodeAt(0));}
+        // =========================
+        // 4️⃣ Encrypt lại DEK
+        // =========================
+        const newKekIv = crypto.randomBytes(12);
+        const dekCipher = crypto.createCipheriv(
+          "aes-256-gcm",
+          newKek,
+          newKekIv
+        );
 
-// let attempts = 0;
+        const newEncryptedDEK = Buffer.concat([
+          dekCipher.update(dek),
+          dekCipher.final(),
+        ]);
+        const newDekAuthTag = dekCipher.getAuthTag();
 
-// async function decrypt(){
-//   try{
-//     if(++attempts > 5){
-//       document.body.innerHTML = "⛔ Quá số lần thử";
-//       return;
-//     }
+        // =========================
+        // 5️⃣ Update Firestore
+        // =========================
+        await doc.ref.update({
+          encryptedDEK: newEncryptedDEK.toString("base64"),
+          kekIv: newKekIv.toString("base64"),
+          dekAuthTag: newDekAuthTag.toString("base64"),
+          kekSalt: newSalt.toString("base64"),
+        });
 
-//     const secret = document.getElementById("secret").value;
-//     const enc = new TextEncoder();
+        rotated++;
+      } catch (e) {
+        console.error(`❌ Rotate failed for doc ${doc.id}`, e);
+        failed++;
+      }
+    }
 
-//     const keyMaterial = await crypto.subtle.importKey(
-//       "raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]
-//     );
-
-//     const key = await crypto.subtle.deriveKey(
-//       {
-//         name:"PBKDF2",
-//         salt:b64(SALT),
-//         iterations:150000,
-//         hash:"SHA-256"
-//       },
-//       keyMaterial,
-//       {name:"AES-GCM",length:256},
-//       false,
-//       ["decrypt"]
-//     );
-
-//     const cipher = b64(ENCRYPTED);
-//     const tag = b64(AUTH_TAG);
-//     const combined = new Uint8Array(cipher.length + tag.length);
-//     combined.set(cipher);
-//     combined.set(tag, cipher.length);
-
-//     const plaintext = await crypto.subtle.decrypt(
-//       {name:"AES-GCM", iv:b64(IV), tagLength:128},
-//       key,
-//       combined
-//     );
-
-//     document.getElementById("out").textContent =
-//       new TextDecoder().decode(plaintext);
-
-//     setTimeout(()=>document.body.innerHTML="⛔ Nội dung đã bị huỷ",300000);
-//   }catch{
-//     alert("❌ Secret sai");
-//   }
-// }
-// </script>
-// </body>
-// </html>`);
-//   } catch {
-//     res.status(403).send("⛔ Token không hợp lệ");
-//   }
-// });
+    res.send(
+      `✅ Rotate KEK xong\n✔ Thành công: ${rotated}\n❌ Thất bại: ${failed}`
+    );
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).send(e.message);
+  }
+});
