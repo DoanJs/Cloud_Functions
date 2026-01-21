@@ -47,16 +47,16 @@ const normalizeVN = (str: string): string => {
     .replace(/\s+/g, " ") // gộp space
     .trim();
 };
-const buildSlugAndTokens = (input: string) => {
-  const normalized = normalizeVN(input);
+// const buildSlugAndTokens = (input: string) => {
+//   const normalized = normalizeVN(input);
 
-  const parts = normalized.split(" ");
+//   const parts = normalized.split(" ");
 
-  return {
-    slugName: parts.join("_"), // nguyen_van_an
-    tokens: parts, // ["nguyen", "van", "an"]
-  };
-};
+//   return {
+//     slugName: parts.join("_"), // nguyen_van_an
+//     tokens: parts, // ["nguyen", "van", "an"]
+//   };
+// };
 export const createAccount = onRequest(async (req, res) => {
   try {
     const {email, password, displayName, telegramChatId} = req.body;
@@ -105,101 +105,86 @@ export const telegramWebhook = onRequest(async (req, res) => {
   res.status(200).send("ok");
 });
 
-export const createSampleDoc = onRequest(async (req, res) => {
-  try {
-    const {uid, secret, name, address, plaintext} = req.body;
+export const uploadEncryptedDoiTuong = onRequest(async (req, res) => {
+  // =========================
+  // 🔓 CORS (BẮT BUỘC)
+  // =========================
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
 
-    if (!uid || !secret || !name || !address || !plaintext) {
-      res.status(400).send("Thiếu uid / secret / name / address / plaintext");
+  // ✅ BẮT BUỘC: xử lý preflight
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  try {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
       return;
     }
 
-    // =========================
-    // 1️⃣ Sinh DEK (per document)
-    // =========================
-    const dek = crypto.randomBytes(32); // 256-bit
+    const data = req.body;
 
     // =========================
-    // 2️⃣ Encrypt plaintext bằng DEK
+    // 1️⃣ Validate tối thiểu
     // =========================
-    const dekIv = crypto.randomBytes(12);
-    const cipherTextCipher = crypto.createCipheriv(
-      "aes-256-gcm",
-      dek,
-      dekIv
-    );
+    const requiredFields = [
+      "ciphertext",
+      "cipherIv",
+      "cipherAuthTag",
+      "encryptedDEK",
+      "kekIv",
+      "dekAuthTag",
+      "kekSalt",
+      "ownerUid",
+      "name",
+      "address",
+    ];
 
-    const ciphertext = Buffer.concat([
-      cipherTextCipher.update(plaintext, "utf8"),
-      cipherTextCipher.final(),
-    ]);
-    const cipherAuthTag = cipherTextCipher.getAuthTag();
-
-    // =========================
-    // 3️⃣ Derive KEK từ secret
-    // =========================
-    const kekSalt = crypto.randomBytes(16);
-    const kek = crypto.pbkdf2Sync(
-      secret,
-      kekSalt,
-      150_000,
-      32,
-      "sha256"
-    );
+    for (const f of requiredFields) {
+      if (!data[f]) {
+        res.status(400).send(`Thiếu field: ${f}`);
+        return;
+      }
+    }
 
     // =========================
-    // 4️⃣ Encrypt DEK bằng KEK
+    // 2️⃣ Sanitize nhẹ
     // =========================
-    const kekIv = crypto.randomBytes(12);
-    const dekCipher = crypto.createCipheriv(
-      "aes-256-gcm",
-      kek,
-      kekIv
-    );
+    const doc = {
+      ciphertext: String(data.ciphertext),
+      cipherIv: String(data.cipherIv),
+      cipherAuthTag: String(data.cipherAuthTag),
 
-    const encryptedDEK = Buffer.concat([
-      dekCipher.update(dek),
-      dekCipher.final(),
-    ]);
-    const dekAuthTag = dekCipher.getAuthTag();
+      encryptedDEK: String(data.encryptedDEK),
+      kekIv: String(data.kekIv),
+      dekAuthTag: String(data.dekAuthTag),
+      kekSalt: String(data.kekSalt),
+
+      version: Number(data.version ?? 2),
+      createdAt: Number(data.createdAt ?? Date.now()),
+
+      slugName: data.slugName ?? "",
+      tokens: Array.isArray(data.tokens) ? data.tokens : [],
+      name: String(data.name),
+      address: String(data.address),
+
+      ownerUid: String(data.ownerUid),
+      sharedWith: Array.isArray(data.sharedWith) ? data.sharedWith : [],
+      public: Boolean(data.public),
+    };
 
     // =========================
-    // 5️⃣ Metadata
+    // 3️⃣ Save Firestore
     // =========================
-    const dataName = buildSlugAndTokens(name);
+    const ref = await db.collection("doituongs").add(doc);
 
-    // =========================
-    // 6️⃣ Save Firestore
-    // =========================
-    await db.collection("doituongs").add({
-      // 🔐 crypto data
-      ciphertext: ciphertext.toString("base64"),
-      cipherIv: dekIv.toString("base64"),
-      cipherAuthTag: cipherAuthTag.toString("base64"),
-
-      encryptedDEK: encryptedDEK.toString("base64"),
-      kekIv: kekIv.toString("base64"),
-      dekAuthTag: dekAuthTag.toString("base64"),
-      kekSalt: kekSalt.toString("base64"),
-
-      version: 2,
-      createdAt: Date.now(),
-
-      // 🔎 search / display
-      slugName: dataName.slugName,
-      tokens: dataName.tokens,
-      name,
-      address,
-
-      // 🔐 permission
-      ownerUid: uid,
-      sharedWith: [],
-      public: false,
-    });
-
-    res.send("✅ Sample document đã tạo (KEK / DEK – v2)");
-  } catch (e: any) {
-    res.status(500).send(e.message);
+    res.send({ok: true, id: ref.id});
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("Upload failed");
   }
 });
 
@@ -536,118 +521,222 @@ async function decrypt(){
   }
 });
 
-export const rotateKEKForDoiTuongs = onRequest(async (req, res) => {
+// export const rotateKEKForDoiTuongs = onRequest(async (req, res) => {
+//   try {
+//     const {ownerUid, oldSecret, newSecret} = req.body;
+
+//     if (!ownerUid || !oldSecret || !newSecret) {
+//       res.status(400).send("Thiếu ownerUid / oldSecret / newSecret");
+//       return;
+//     }
+
+//     // 🔎 Lấy tất cả doituongs của user
+//     const snap = await db
+//       .collection("doituongs")
+//       .where("ownerUid", "==", ownerUid)
+//       .get();
+
+//     if (snap.empty) {
+//       res.send("ℹ️ Không có document nào để rotate");
+//       return;
+//     }
+
+//     let rotated = 0;
+//     let failed = 0;
+
+//     for (const doc of snap.docs) {
+//       try {
+//         const d = doc.data();
+
+//         // =========================
+//         // 1️⃣ Derive KEK cũ
+//         // =========================
+//         const oldSalt = Buffer.from(d.kekSalt, "base64");
+//         const oldKek = crypto.pbkdf2Sync(
+//           oldSecret,
+//           oldSalt,
+//           150_000,
+//           32,
+//           "sha256"
+//         );
+
+//         // =========================
+//         // 2️⃣ Decrypt DEK
+//         // =========================
+//         const dekIv = Buffer.from(d.kekIv, "base64");
+//         const dekAuthTag = Buffer.from(d.dekAuthTag, "base64");
+//         const encryptedDEK = Buffer.from(d.encryptedDEK, "base64");
+
+//         const dekDecipher = crypto.createDecipheriv(
+//           "aes-256-gcm",
+//           oldKek,
+//           dekIv
+//         );
+//         dekDecipher.setAuthTag(dekAuthTag);
+
+//         const dek = Buffer.concat([
+//           dekDecipher.update(encryptedDEK),
+//           dekDecipher.final(),
+//         ]);
+
+//         if (dek.length !== 32) {
+//           throw new Error("DEK length invalid");
+//         }
+
+//         // =========================
+//         // 3️⃣ Derive KEK mới
+//         // =========================
+//         const newSalt = crypto.randomBytes(16);
+//         const newKek = crypto.pbkdf2Sync(
+//           newSecret,
+//           newSalt,
+//           150_000,
+//           32,
+//           "sha256"
+//         );
+
+//         // =========================
+//         // 4️⃣ Encrypt lại DEK
+//         // =========================
+//         const newKekIv = crypto.randomBytes(12);
+//         const dekCipher = crypto.createCipheriv(
+//           "aes-256-gcm",
+//           newKek,
+//           newKekIv
+//         );
+
+//         const newEncryptedDEK = Buffer.concat([
+//           dekCipher.update(dek),
+//           dekCipher.final(),
+//         ]);
+//         const newDekAuthTag = dekCipher.getAuthTag();
+
+//         // =========================
+//         // 5️⃣ Update Firestore
+//         // =========================
+//         await doc.ref.update({
+//           encryptedDEK: newEncryptedDEK.toString("base64"),
+//           kekIv: newKekIv.toString("base64"),
+//           dekAuthTag: newDekAuthTag.toString("base64"),
+//           kekSalt: newSalt.toString("base64"),
+//         });
+
+//         rotated++;
+//       } catch (e) {
+//         console.error(`❌ Rotate failed for doc ${doc.id}`, e);
+//         failed++;
+//       }
+//     }
+
+//     res.send(
+//       `✅ Rotate KEK xong\n✔ Thành công: ${rotated}\n❌ Thất bại: ${failed}`
+//     );
+//   } catch (e: any) {
+//     console.error(e);
+//     res.status(500).send(e.message);
+//   }
+// });
+export const rotateKEKWriteBatch = onRequest(async (req, res) => {
+  // CORS
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
   try {
-    const {ownerUid, oldSecret, newSecret} = req.body;
+    const {ownerUid, updates} = req.body as {
+      ownerUid: string;
+      updates: Array<{
+        docId: string;
+        encryptedDEK: string;
+        kekIv: string;
+        dekAuthTag: string;
+        kekSalt: string;
+      }>;
+    };
 
-    if (!ownerUid || !oldSecret || !newSecret) {
-      res.status(400).send("Thiếu ownerUid / oldSecret / newSecret");
+    if (!ownerUid || !Array.isArray(updates) || updates.length === 0) {
+      res.status(400).send("Thiếu ownerUid hoặc updates rỗng");
       return;
     }
 
-    // 🔎 Lấy tất cả doituongs của user
-    const snap = await db
-      .collection("doituongs")
-      .where("ownerUid", "==", ownerUid)
-      .get();
-
-    if (snap.empty) {
-      res.send("ℹ️ Không có document nào để rotate");
+    // giới hạn để tránh abuse (Firestore batch giới hạn 500 writes)
+    if (updates.length > 200) {
+      res.status(400).send("updates quá nhiều (tối đa 200/lần)");
       return;
     }
 
-    let rotated = 0;
-    let failed = 0;
-
-    for (const doc of snap.docs) {
-      try {
-        const d = doc.data();
-
-        // =========================
-        // 1️⃣ Derive KEK cũ
-        // =========================
-        const oldSalt = Buffer.from(d.kekSalt, "base64");
-        const oldKek = crypto.pbkdf2Sync(
-          oldSecret,
-          oldSalt,
-          150_000,
-          32,
-          "sha256"
-        );
-
-        // =========================
-        // 2️⃣ Decrypt DEK
-        // =========================
-        const dekIv = Buffer.from(d.kekIv, "base64");
-        const dekAuthTag = Buffer.from(d.dekAuthTag, "base64");
-        const encryptedDEK = Buffer.from(d.encryptedDEK, "base64");
-
-        const dekDecipher = crypto.createDecipheriv(
-          "aes-256-gcm",
-          oldKek,
-          dekIv
-        );
-        dekDecipher.setAuthTag(dekAuthTag);
-
-        const dek = Buffer.concat([
-          dekDecipher.update(encryptedDEK),
-          dekDecipher.final(),
-        ]);
-
-        if (dek.length !== 32) {
-          throw new Error("DEK length invalid");
-        }
-
-        // =========================
-        // 3️⃣ Derive KEK mới
-        // =========================
-        const newSalt = crypto.randomBytes(16);
-        const newKek = crypto.pbkdf2Sync(
-          newSecret,
-          newSalt,
-          150_000,
-          32,
-          "sha256"
-        );
-
-        // =========================
-        // 4️⃣ Encrypt lại DEK
-        // =========================
-        const newKekIv = crypto.randomBytes(12);
-        const dekCipher = crypto.createCipheriv(
-          "aes-256-gcm",
-          newKek,
-          newKekIv
-        );
-
-        const newEncryptedDEK = Buffer.concat([
-          dekCipher.update(dek),
-          dekCipher.final(),
-        ]);
-        const newDekAuthTag = dekCipher.getAuthTag();
-
-        // =========================
-        // 5️⃣ Update Firestore
-        // =========================
-        await doc.ref.update({
-          encryptedDEK: newEncryptedDEK.toString("base64"),
-          kekIv: newKekIv.toString("base64"),
-          dekAuthTag: newDekAuthTag.toString("base64"),
-          kekSalt: newSalt.toString("base64"),
-        });
-
-        rotated++;
-      } catch (e) {
-        console.error(`❌ Rotate failed for doc ${doc.id}`, e);
-        failed++;
+    // Validate tối thiểu từng item
+    for (const u of updates) {
+      if (!u?.docId || !u.encryptedDEK ||
+        !u.kekIv || !u.dekAuthTag || !u.kekSalt) {
+        res.status(400).send("Có item thiếu field");
+        return;
       }
     }
 
-    res.send(
-      `✅ Rotate KEK xong\n✔ Thành công: ${rotated}\n❌ Thất bại: ${failed}`
-    );
-  } catch (e: any) {
+    // 🔐 (Khuyến nghị) Verify Firebase Auth ở đây nếu bạn dùng đăng nhập:
+    // - Lấy idToken từ header Authorization: Bearer <token>
+    // - Verify token => uid
+    // - Bắt buộc uid === ownerUid
+    // Mình để comment để bạn bật khi cần.
+    //
+    // const authHeader = String(req.headers.authorization || "");
+    // const m = authHeader.match(/^Bearer\s+(.+)$/i);
+    // if (!m) return res.status(401).send("Unauthenticated");
+    // const decoded = await admin.auth().verifyIdToken(m[1]);
+    // if (decoded.uid !== ownerUid) return res.status(403).send("Forbidden");
+
+    // 1) Load tất cả docs để kiểm tra ownerUid (chống client update bậy)
+    const refs = updates.map((u) => db.collection("doituongs").doc(u.docId));
+    const snaps = await db.getAll(...refs);
+
+    // 2) Batch update
+    const batch = db.batch();
+    const failed: Array<{ docId: string; reason: string }> = [];
+
+    snaps.forEach((snap, idx) => {
+      const u = updates[idx];
+
+      if (!snap.exists) {
+        failed.push({docId: u.docId, reason: "NOT_FOUND"});
+        return;
+      }
+
+      const data = snap.data()!;
+      if (data.ownerUid !== ownerUid) {
+        failed.push({docId: u.docId, reason: "FORBIDDEN_OWNER"});
+        return;
+      }
+
+      batch.update(snap.ref, {
+        encryptedDEK: u.encryptedDEK,
+        kekIv: u.kekIv,
+        dekAuthTag: u.dekAuthTag,
+        kekSalt: u.kekSalt,
+        rotatedAt: Date.now(),
+      });
+    });
+
+    await batch.commit();
+
+    res.send({
+      ok: true,
+      total: updates.length,
+      updated: updates.length - failed.length,
+      failed,
+    });
+  } catch (e) {
     console.error(e);
-    res.status(500).send(e.message);
+    res.status(500).send("Rotate batch write failed");
   }
 });
+
