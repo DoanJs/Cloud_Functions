@@ -5,11 +5,60 @@ import {defineSecret} from "firebase-functions/params";
 import {onRequest} from "firebase-functions/v2/https";
 import {setGlobalOptions} from "firebase-functions/v2/options";
 import {onDocumentCreated} from "firebase-functions/v2/firestore";
+import type {Request, Response} from "express";
 
 setGlobalOptions({region: "asia-southeast1"});
 admin.initializeApp();
 const db = admin.firestore();
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
+
+const ALLOWED_ORIGINS = [
+  "http://localhost:3000", // dev
+];
+
+export async function corsAndAuth(
+  req: Request,
+  res: Response
+): Promise<{ uid: string } | null> {
+  const origin = String(req.headers.origin || "");
+
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    res.status(403).send("CORS forbidden");
+    return null;
+  }
+
+  res.set("Access-Control-Allow-Origin", origin);
+  res.set("Vary", "Origin");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
+  res.set("Access-Control-Allow-Credentials", "true");
+
+  // Preflight
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return null;
+  }
+
+  // ---------- Firebase Auth ----------
+  const authHeader = String(req.headers.authorization || "");
+  const m = authHeader.match(/^Bearer\s+(.+)$/);
+
+  if (!m) {
+    res.status(401).send("Unauthenticated");
+    return null;
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(m[1]);
+    return {uid: decoded.uid};
+  } catch {
+    res.status(401).send("Invalid token");
+    return null;
+  }
+}
 
 async function sendTelegram(chatId: number, text: string) {
   const res = await fetch(
@@ -95,18 +144,8 @@ export const telegramWebhook = onRequest(async (req, res) => {
 });
 
 export const uploadEncryptedDoiTuong = onRequest(async (req, res) => {
-  // =========================
-  // 🔓 CORS (BẮT BUỘC)
-  // =========================
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type");
-
-  // ✅ BẮT BUỘC: xử lý preflight
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
+  const auth = await corsAndAuth(req, res);
+  if (!auth) return;
 
   try {
     if (req.method !== "POST") {
@@ -115,6 +154,7 @@ export const uploadEncryptedDoiTuong = onRequest(async (req, res) => {
     }
 
     const data = req.body;
+    const ownerUid = auth.uid; // 🔥 UID TIN CẬY DUY NHẤT
 
     // =========================
     // 1️⃣ Validate tối thiểu
@@ -153,14 +193,14 @@ export const uploadEncryptedDoiTuong = onRequest(async (req, res) => {
       kekSalt: String(data.kekSalt),
 
       version: Number(data.version ?? 2),
-      createdAt: Number(data.createdAt ?? Date.now()),
+      createdAt: Date.now(),
 
       slugName: data.slugName ?? "",
       tokens: Array.isArray(data.tokens) ? data.tokens : [],
       name: String(data.name),
       address: String(data.address),
 
-      ownerUid: String(data.ownerUid),
+      ownerUid,
       sharedWith: Array.isArray(data.sharedWith) ? data.sharedWith : [],
       public: Boolean(data.public),
     };
@@ -510,24 +550,113 @@ async function decrypt(){
   }
 });
 
-export const rotateKEKWriteBatch = onRequest(async (req, res) => {
-  // CORS
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+// export const rotateKEKWriteBatch = onRequest(async (req, res) => {
+//   const auth = await corsAndAuth(req, res);
+//   if (!auth) return;
 
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
+//   if (req.method !== "POST") {
+//     res.status(405).send("Method Not Allowed");
+//     return;
+//   }
+
+//   try {
+//     const ownerUid = auth.uid;
+
+//     const {updates} = req.body as {
+//       updates: Array<{
+//         docId: string;
+//         encryptedDEK: string;
+//         kekIv: string;
+//         dekAuthTag: string;
+//         kekSalt: string;
+//       }>;
+//     };
+
+//     if (!Array.isArray(updates) || updates.length === 0) {
+//       res.status(400).send("updates rỗng");
+//       return;
+//     }
+
+//     if (updates.length > 200) {
+//       res.status(400).send("updates quá nhiều (tối đa 200/lần)");
+//       return;
+//     }
+
+//     for (const u of updates) {
+//       if (
+//         !u?.docId ||
+//         !u.encryptedDEK ||
+//         !u.kekIv ||
+//         !u.dekAuthTag ||
+//         !u.kekSalt
+//       ) {
+//         res.status(400).send("Có item thiếu field");
+//         return;
+//       }
+//     }
+
+//     const refs = updates.map((u) => db.collection("doituongs").doc(u.docId));
+//     const snaps = await db.getAll(...refs);
+
+//     const batch = db.batch();
+//     const failed: Array<{docId: string; reason: string}> = [];
+//     let updatedCount = 0;
+
+//     snaps.forEach((snap, idx) => {
+//       const u = updates[idx];
+
+//       if (!snap.exists) {
+//         failed.push({docId: u.docId, reason: "NOT_FOUND"});
+//         return;
+//       }
+
+//       const data = snap.data()!;
+//       if (data.ownerUid !== ownerUid) {
+//         failed.push({docId: u.docId, reason: "FORBIDDEN_OWNER"});
+//         return;
+//       }
+
+//       batch.update(snap.ref, {
+//         encryptedDEK: String(u.encryptedDEK),
+//         kekIv: String(u.kekIv),
+//         dekAuthTag: String(u.dekAuthTag),
+//         kekSalt: String(u.kekSalt),
+//         rotatedAt: Date.now(),
+//       });
+//       updatedCount++;
+//     });
+
+//     if (updatedCount === 0) {
+//       res.status(403).send("Không có document hợp lệ để rotate");
+//       return;
+//     }
+
+//     await batch.commit();
+
+//     res.send({
+//       ok: true,
+//       total: updates.length,
+//       updated: updatedCount,
+//       failed,
+//     });
+//   } catch (e) {
+//     console.error(e);
+//     res.status(500).send("Rotate batch write failed");
+//   }
+// });
+export const rotateKEKWriteBatch = onRequest(async (req, res) => {
+  const auth = await corsAndAuth(req, res);
+  if (!auth) return;
+
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
     return;
   }
 
   try {
-    const {ownerUid, updates} = req.body as {
-      ownerUid: string;
+    const ownerUid = auth.uid;
+
+    const {updates} = req.body as {
       updates: Array<{
         docId: string;
         encryptedDEK: string;
@@ -537,80 +666,75 @@ export const rotateKEKWriteBatch = onRequest(async (req, res) => {
       }>;
     };
 
-    if (!ownerUid || !Array.isArray(updates) || updates.length === 0) {
-      res.status(400).send("Thiếu ownerUid hoặc updates rỗng");
+    if (!Array.isArray(updates) || updates.length === 0) {
+      res.status(400).send("updates rỗng");
       return;
     }
 
-    // giới hạn để tránh abuse (Firestore batch giới hạn 500 writes)
-    if (updates.length > 200) {
-      res.status(400).send("updates quá nhiều (tối đa 200/lần)");
-      return;
-    }
+    // ===== CONFIG =====
+    const CHUNK_SIZE = 200;
 
-    // Validate tối thiểu từng item
-    for (const u of updates) {
-      if (!u?.docId || !u.encryptedDEK ||
-        !u.kekIv || !u.dekAuthTag || !u.kekSalt) {
-        res.status(400).send("Có item thiếu field");
-        return;
-      }
-    }
+    const allFailed: Array<{docId: string; reason: string}> = [];
+    let totalUpdated = 0;
 
-    // 🔐 (Khuyến nghị) Verify Firebase Auth ở đây nếu bạn dùng đăng nhập:
-    // - Lấy idToken từ header Authorization: Bearer <token>
-    // - Verify token => uid
-    // - Bắt buộc uid === ownerUid
-    // Mình để comment để bạn bật khi cần.
-    //
-    // const authHeader = String(req.headers.authorization || "");
-    // const m = authHeader.match(/^Bearer\s+(.+)$/i);
-    // if (!m) return res.status(401).send("Unauthenticated");
-    // const decoded = await admin.auth().verifyIdToken(m[1]);
-    // if (decoded.uid !== ownerUid) return res.status(403).send("Forbidden");
+    // ===== CHUNK LOOP =====
+    for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+      const chunk = updates.slice(i, i + CHUNK_SIZE);
 
-    // 1) Load tất cả docs để kiểm tra ownerUid (chống client update bậy)
-    const refs = updates.map((u) => db.collection("doituongs").doc(u.docId));
-    const snaps = await db.getAll(...refs);
+      const refs = chunk.map((u) =>
+        db.collection("doituongs").doc(u.docId)
+      );
+      const snaps = await db.getAll(...refs);
 
-    // 2) Batch update
-    const batch = db.batch();
-    const failed: Array<{ docId: string; reason: string }> = [];
+      const batch = db.batch();
+      let chunkUpdated = 0;
 
-    snaps.forEach((snap, idx) => {
-      const u = updates[idx];
+      snaps.forEach((snap, idx) => {
+        const u = chunk[idx];
 
-      if (!snap.exists) {
-        failed.push({docId: u.docId, reason: "NOT_FOUND"});
-        return;
-      }
+        if (!snap.exists) {
+          allFailed.push({docId: u.docId, reason: "NOT_FOUND"});
+          return;
+        }
 
-      const data = snap.data()!;
-      if (data.ownerUid !== ownerUid) {
-        failed.push({docId: u.docId, reason: "FORBIDDEN_OWNER"});
-        return;
-      }
+        const data = snap.data()!;
+        if (data.ownerUid !== ownerUid) {
+          allFailed.push({docId: u.docId, reason: "FORBIDDEN_OWNER"});
+          return;
+        }
 
-      batch.update(snap.ref, {
-        encryptedDEK: u.encryptedDEK,
-        kekIv: u.kekIv,
-        dekAuthTag: u.dekAuthTag,
-        kekSalt: u.kekSalt,
-        rotatedAt: Date.now(),
+        batch.update(snap.ref, {
+          encryptedDEK: String(u.encryptedDEK),
+          kekIv: String(u.kekIv),
+          dekAuthTag: String(u.dekAuthTag),
+          kekSalt: String(u.kekSalt),
+          rotatedAt: Date.now(),
+        });
+
+        chunkUpdated++;
       });
-    });
 
-    await batch.commit();
+      if (chunkUpdated > 0) {
+        await batch.commit();
+        totalUpdated += chunkUpdated;
+      }
+    }
+
+    if (totalUpdated === 0) {
+      res.status(403).send("Không có document hợp lệ để rotate");
+      return;
+    }
 
     res.send({
       ok: true,
       total: updates.length,
-      updated: updates.length - failed.length,
-      failed,
+      updated: totalUpdated,
+      failed: allFailed,
     });
   } catch (e) {
     console.error(e);
     res.status(500).send("Rotate batch write failed");
   }
 });
+
 

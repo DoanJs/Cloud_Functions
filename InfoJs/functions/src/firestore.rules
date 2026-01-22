@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ======================================================
+       Helpers
+    ====================================================== */
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // owner của document đã tồn tại
+    function resourceOwner() {
+      return signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // owner của document đang được tạo / ghi
+    function requestOwner() {
+      return signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    /* ======================================================
+       users – profile (secretHash do Cloud Function ghi)
+    ====================================================== */
+    match /users/{uid} {
+
+      // đọc profile của chính mình
+      allow get: if signedIn()
+        && request.auth.uid == uid;
+
+      // ❌ không cho query / list
+      allow list: if false;
+
+      // tạo user profile (client)
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && !('secretHash' in request.resource.data);
+
+      // update profile
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && !('secretHash' in request.resource.data)
+        // không cho đổi telegramChatId từ client
+        && request.resource.data.telegramChatId == resource.data.telegramChatId;
+
+      // ❌ không cho xoá
+      allow delete: if false;
+    }
+
+    /* ======================================================
+       doituongs – metadata plaintext + encrypted content
+    ====================================================== */
+    match /doituongs/{docId} {
+
+      // đọc nếu public / owner / shared
+      allow get: if signedIn() && (
+        resource.data.public == true ||
+        resourceOwner() ||
+        (
+          resource.data.sharedWith is list &&
+          resource.data.sharedWith.hasAny([request.auth.uid])
+        )
+      );
+
+      // cho phép query (Firestore vẫn check từng doc bằng get)
+      allow list: if signedIn();
+
+      // tạo đối tượng
+      allow create: if signedIn()
+        && requestOwner()
+        && request.resource.data.keys().hasAll([
+          "ciphertext", "cipherIv", "cipherAuthTag",
+          "encryptedDEK", "kekIv", "dekAuthTag", "kekSalt",
+          "ownerUid", "tokens", "public", "sharedWith",
+          "name", "address", "createdAt"
+        ]);
+
+      // update – chỉ owner, không đổi ownerUid
+      allow update: if resourceOwner()
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      // delete – chỉ owner
+      allow delete: if resourceOwner();
+    }
+
+    /* ======================================================
+       processMessages – internal only (Telegram queue)
+    ====================================================== */
+    match /processMessages/{id} {
+      allow read, write: if false;
+    }
+
+    /* ======================================================
+       viewTokens – internal only (one-time view token)
+    ====================================================== */
+    match /viewTokens/{token} {
+      allow read, write: if false;
+    }
+  }
+}
