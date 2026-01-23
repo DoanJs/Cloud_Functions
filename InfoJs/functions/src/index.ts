@@ -13,7 +13,8 @@ const db = admin.firestore();
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
 
 const ALLOWED_ORIGINS = [
-  "http://localhost:3000", // dev
+  "https://info-js-rho.vercel.app", // pro
+  // "http://localhost:3000", // dev
 ];
 
 export async function corsAndAuth(
@@ -280,7 +281,7 @@ export const onProcessMessageCreated = onDocumentCreated(
       });
 
       const url =
-        "https://asia-southeast1-infojs-c6205.cloudfunctions.net/view" +
+        "https://view-25yevkpmeq-as.a.run.app" +
         `?token=${token}`;
 
       const botReply = await sendTelegram(
@@ -550,100 +551,6 @@ async function decrypt(){
   }
 });
 
-// export const rotateKEKWriteBatch = onRequest(async (req, res) => {
-//   const auth = await corsAndAuth(req, res);
-//   if (!auth) return;
-
-//   if (req.method !== "POST") {
-//     res.status(405).send("Method Not Allowed");
-//     return;
-//   }
-
-//   try {
-//     const ownerUid = auth.uid;
-
-//     const {updates} = req.body as {
-//       updates: Array<{
-//         docId: string;
-//         encryptedDEK: string;
-//         kekIv: string;
-//         dekAuthTag: string;
-//         kekSalt: string;
-//       }>;
-//     };
-
-//     if (!Array.isArray(updates) || updates.length === 0) {
-//       res.status(400).send("updates rỗng");
-//       return;
-//     }
-
-//     if (updates.length > 200) {
-//       res.status(400).send("updates quá nhiều (tối đa 200/lần)");
-//       return;
-//     }
-
-//     for (const u of updates) {
-//       if (
-//         !u?.docId ||
-//         !u.encryptedDEK ||
-//         !u.kekIv ||
-//         !u.dekAuthTag ||
-//         !u.kekSalt
-//       ) {
-//         res.status(400).send("Có item thiếu field");
-//         return;
-//       }
-//     }
-
-//     const refs = updates.map((u) => db.collection("doituongs").doc(u.docId));
-//     const snaps = await db.getAll(...refs);
-
-//     const batch = db.batch();
-//     const failed: Array<{docId: string; reason: string}> = [];
-//     let updatedCount = 0;
-
-//     snaps.forEach((snap, idx) => {
-//       const u = updates[idx];
-
-//       if (!snap.exists) {
-//         failed.push({docId: u.docId, reason: "NOT_FOUND"});
-//         return;
-//       }
-
-//       const data = snap.data()!;
-//       if (data.ownerUid !== ownerUid) {
-//         failed.push({docId: u.docId, reason: "FORBIDDEN_OWNER"});
-//         return;
-//       }
-
-//       batch.update(snap.ref, {
-//         encryptedDEK: String(u.encryptedDEK),
-//         kekIv: String(u.kekIv),
-//         dekAuthTag: String(u.dekAuthTag),
-//         kekSalt: String(u.kekSalt),
-//         rotatedAt: Date.now(),
-//       });
-//       updatedCount++;
-//     });
-
-//     if (updatedCount === 0) {
-//       res.status(403).send("Không có document hợp lệ để rotate");
-//       return;
-//     }
-
-//     await batch.commit();
-
-//     res.send({
-//       ok: true,
-//       total: updates.length,
-//       updated: updatedCount,
-//       failed,
-//     });
-//   } catch (e) {
-//     console.error(e);
-//     res.status(500).send("Rotate batch write failed");
-//   }
-// });
 export const rotateKEKWriteBatch = onRequest(async (req, res) => {
   const auth = await corsAndAuth(req, res);
   if (!auth) return;
