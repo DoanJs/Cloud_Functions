@@ -433,7 +433,19 @@ export const view = onRequest(async (req, res) => {
 <input type="password" id="secret"/>
 <button onclick="decrypt()">Giải mã</button>
 
-<pre id="out"></pre>
+<div
+  id="out"
+  style="
+    width:100%;
+    max-width:100%;
+    white-space:pre-wrap;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    line-height:1.6;
+    font-size:15px;
+  "
+></div>
+
 
 <script>
 const DATA = ${JSON.stringify({
@@ -531,8 +543,12 @@ async function decrypt(){
       contentCombined
     );
 
-    document.getElementById("out").textContent =
-      new TextDecoder().decode(plaintext);
+    // document.getElementById("out").textContent =
+    //   new TextDecoder().decode(plaintext);
+
+    document.getElementById("out").innerHTML =
+  new TextDecoder().decode(plaintext);
+
 
     // ⏳ Auto destroy after 5 minutes
     setTimeout(() => {
