@@ -433,7 +433,15 @@ export const view = onRequest(async (req, res) => {
 <input type="password" id="secret"/>
 <button onclick="decrypt()">Giải mã</button>
 
-<pre id="out"></pre>
+<div style={{
+          width: '100%',
+          maxWidth: "100%",
+          whiteSpace:"pre-wrap",
+          wordBreak:"break-word",
+          overflowWrap:"anywhere",
+          lineHeight: 1.6,
+          fontSize: "15px"
+        }} id="out"></div>
 
 <script>
 const DATA = ${JSON.stringify({
