@@ -299,7 +299,7 @@ export const onProcessMessageCreated = onDocumentCreated(
       if (botMessageId) {
         setTimeout(async () => {
           await deleteMessage(chatId, botMessageId);
-        }, 60_000);
+        }, 30_000);
       }
 
       return;
@@ -376,7 +376,7 @@ export const onProcessMessageCreated = onDocumentCreated(
     if (botMessageId) {
       setTimeout(async () => {
         await deleteMessage(chatId, botMessageId);
-      }, 60_000);
+      }, 30_000);
     }
   }
 );
@@ -550,10 +550,10 @@ async function decrypt(){
   new TextDecoder().decode(plaintext);
 
 
-    // ⏳ Auto destroy after 5 minutes
+    // ⏳ Auto destroy after 3 minutes
     setTimeout(() => {
       document.body.innerHTML = "⛔ Nội dung đã bị huỷ";
-    }, 300000);
+    }, 180000);
 
   } catch (e) {
     alert("❌ Secret sai hoặc dữ liệu không hợp lệ");
