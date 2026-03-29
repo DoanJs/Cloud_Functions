@@ -11,7 +11,7 @@ const db = getFirestore();
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
 /* ================== UTILS ================== */
 
-type DeleteEntityType = "report" | "plan";
+type DeleteEntityType = "report" | "plan" | "children";
 
 async function sendTelegram(
   chatId: string,
@@ -562,6 +562,112 @@ export const deletePlan = onCall(
   }
 );
 
+export const deleteChildDeep = onCall(
+  {region: "asia-southeast1", secrets: [TELEGRAM_BOT_TOKEN]},
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Login required");
+    }
+
+    const {childId} = req.data as {childId?: string};
+    if (!childId) {
+      throw new HttpsError("invalid-argument", "childId is required");
+    }
+
+    const actor: any = await getUser(uid);
+    if (!actor) {
+      throw new HttpsError("failed-precondition", "Actor not found");
+    }
+
+    // Chỉ admin được xóa trẻ
+    if (actor.role !== "admin") {
+      throw new HttpsError("permission-denied", "Only admin can delete child");
+    }
+
+    // 1️⃣ Lấy child trước khi xoá
+    const childRef = db.doc(`children/${childId}`);
+    const childSnap = await childRef.get();
+
+    if (!childSnap.exists) {
+      throw new HttpsError("not-found", "Child not found");
+    }
+
+    const childData: any = childSnap.data();
+
+    // 2️⃣ Lấy toàn bộ plans thuộc child
+    const plansSnap = await db
+      .collection("plans")
+      .where("childId", "==", childId)
+      .get();
+
+    // 3️⃣ Xóa từng plan + planTasks
+    for (const planDoc of plansSnap.docs) {
+      const planId = planDoc.id;
+      const planRef = planDoc.ref;
+
+      const planTasksSnap = await db
+        .collection("planTasks")
+        .where("planId", "==", planId)
+        .get();
+
+      const batch = db.batch();
+
+      planTasksSnap.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      batch.delete(planRef);
+
+      await batch.commit();
+    }
+
+    // 4️⃣ Lấy toàn bộ reports thuộc child
+    const reportsSnap = await db
+      .collection("reports")
+      .where("childId", "==", childId)
+      .get();
+
+    // 5️⃣ Xóa từng report + reportTasks
+    for (const reportDoc of reportsSnap.docs) {
+      const reportId = reportDoc.id;
+      const reportRef = reportDoc.ref;
+
+      const reportTasksSnap = await db
+        .collection("reportTasks")
+        .where("reportId", "==", reportId)
+        .get();
+
+      const batch = db.batch();
+
+      reportTasksSnap.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      batch.delete(reportRef);
+
+      await batch.commit();
+    }
+
+    // 6️⃣ Cuối cùng mới xóa child
+    await childRef.delete();
+
+    // 7️⃣ Notify sau khi xoá xong toàn bộ
+    await notifyDeleteEntity({
+      type: "children",
+      actorId: uid,
+      data: childData,
+    });
+
+    return {
+      ok: true,
+      deletedChildId: childId,
+      deletedPlansCount: plansSnap.size,
+      deletedReportsCount: reportsSnap.size,
+    };
+  }
+);
+
 /* ================== CLOUD FUNCTION TELEGRAM WEBHOOK ================== */
 /* =====================================================
    CONFIG
@@ -971,8 +1077,8 @@ async function getChildrenWithoutDocument(
   const childrenSnap = await db.collection("children").get();
 
   return childrenSnap.docs
-    .map((d) => ({id: d.id, ...d.data()}))
-    .filter((c) => !childHasDoc.has(c.id));
+    .map((d) => ({id: d.id, ...d.data()} as {id: string, status?: string}))
+    .filter((c) => !childHasDoc.has(c.id) && c.status !== "paused");
 }
 
 async function getChildrenMap(childIds: string[]) {
@@ -1093,7 +1199,7 @@ export const monthlyTeacherReminderFirst = onSchedule(
 );
 export const monthlyTeacherReminderLast = onSchedule(
   {
-    schedule: "0 8 28 * *", // mỗi 8h sáng ngày 28 hàng tháng
+    schedule: "0 8 27 * *", // mỗi 8h sáng ngày 28 hàng tháng
     timeZone: "Asia/Ho_Chi_Minh",
     region: "asia-southeast1",
     secrets: [TELEGRAM_BOT_TOKEN],
@@ -1205,7 +1311,7 @@ function getReminderHeader(
   if (level === "FIRST") {
     return `⏰ <b>CHÚ Ý : Deadline gửi ${cfg.label.toUpperCase()} `+
     `THÁNG ${month}/${year}</b>`+
-    " đã đến hạn. Các cô nhanh chóng " +
+    " đã đến hạn. Cô nhanh chóng " +
     "gửi duyệt đến quản lý chuyên môn.";
   }
 
