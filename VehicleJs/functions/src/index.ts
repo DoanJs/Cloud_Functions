@@ -65,6 +65,7 @@ export const submitBorrowRequest = onCall(
 
       requestedByUid: uid,
       requestedByName,
+      type: "borrow",
 
       createdAt: FieldValue.serverTimestamp(),
     });
@@ -81,6 +82,19 @@ export const approveBorrowRequest = onCall(
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Bạn cần đăng nhập.");
+    }
+
+    const uid = request.auth.uid;
+
+    // ✅ check role từ Firestore
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.data() || {};
+
+    if (userData.role !== "admin") {
+      throw new HttpsError(
+        "permission-denied",
+        "Bạn không có quyền duyệt yêu cầu.",
+      );
     }
 
     const requestId = String(request.data?.requestId || "").trim();
@@ -170,6 +184,70 @@ export const approveBorrowRequest = onCall(
     return {
       success: true,
       message: "Duyệt yêu cầu mượn xe thành công.",
+    };
+  },
+);
+export const rejectBorrowRequest = onCall(
+  {region: "asia-southeast1"},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Bạn cần đăng nhập.");
+    }
+
+    const uid = request.auth.uid;
+
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.data() || {};
+
+    if (userData.role !== "admin") {
+      throw new HttpsError(
+        "permission-denied",
+        "Bạn không có quyền từ chối yêu cầu.",
+      );
+    }
+
+    const requestId = String(request.data?.requestId || "").trim();
+    if (!requestId) {
+      throw new HttpsError("invalid-argument", "Thiếu requestId.");
+    }
+
+    const requestRef = db.collection("borrow_requests").doc(requestId);
+
+    await db.runTransaction(async (tx) => {
+      const requestSnap = await tx.get(requestRef);
+
+      if (!requestSnap.exists) {
+        throw new HttpsError("not-found", "Không tìm thấy yêu cầu.");
+      }
+
+      const requestData = requestSnap.data() || {};
+
+      if (requestData.type !== "borrow") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Không phải yêu cầu mượn xe.",
+        );
+      }
+
+      if (requestData.status !== "pending") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Yêu cầu đã được xử lý trước đó.",
+        );
+      }
+
+      const now = FieldValue.serverTimestamp();
+
+      // update request
+      tx.update(requestRef, {
+        status: "rejected",
+        updatedAt: now,
+      });
+    });
+
+    return {
+      success: true,
+      message: "Từ chối yêu cầu mượn xe thành công.",
     };
   },
 );
