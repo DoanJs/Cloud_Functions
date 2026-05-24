@@ -12,6 +12,8 @@ const db = getFirestore();
 const FieldValue = admin.firestore.FieldValue;
 
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
+// const ADMIN_CHAT_ID = defineSecret("ADMIN_CHAT_ID");
+// const ADMIN_ID = defineSecret("ADMIN_ID");
 type DeleteEntityType = "report" | "plan" | "children";
 
 /**
@@ -316,6 +318,157 @@ export const deletePlan = onCall(
         reportSaveds: reportSavedsSnap.size,
       },
     };
+  }
+);
+
+/**
+ * AI tạo tổng kết
+ */
+
+// functions/src/index.ts
+
+import {GoogleGenAI, Type} from "@google/genai";
+
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+
+type GoalSummaryInput = {
+  domain: string;
+  supportText: string;
+  teachingContent: string;
+  teacherBullets: string[];
+};
+
+function buildPrompt(data: GoalSummaryInput) {
+  return `
+Bạn là giáo viên can thiệp viết báo cáo tổng kết cuối tháng cho trẻ.
+
+Nhiệm vụ:
+Dựa vào các dữ liệu được cung cấp, hãy viết phần "Tổng kết" 
+phù hợp cho mục tiêu can thiệp.
+
+Dữ liệu:
+- Lĩnh vực: ${data.domain}
+- Mức độ hỗ trợ: ${data.supportText}
+- Nội dung dạy/can thiệp: ${data.teachingContent}
+- Ghi chú/gạch đầu dòng của giáo viên:
+${data.teacherBullets.map((item, index) => `${index + 1}. ${item}`).join("\n")}
+
+Yêu cầu:
+- Viết thành 1 đoạn văn hoàn chỉnh.
+- Không gạch đầu dòng.
+- Văn phong chuyên môn, nhẹ nhàng, dễ hiểu cho phụ huynh.
+- Dựa sát vào dữ liệu được cung cấp.
+- Có thể diễn đạt lại ý của giáo viên cho mạch lạc hơn.
+- Có thể thêm số liệu, phần trăm, số cơ hội, 
+số lần duy trì nếu dữ liệu giáo viên có đề cập.
+- Không tự tạo số liệu nếu dữ liệu không có.
+- Không tự thêm nhận xét chuyên môn ngoài dữ liệu được cung cấp.
+- Nếu dữ liệu còn ít, viết thận trọng, không suy diễn quá mức.
+- Độ dài khoảng 4–7 câu.
+- Chỉ viết phần tổng kết, không viết tiêu đề.
+
+Chỉ trả về JSON hợp lệ theo format:
+{
+  "summary": "..."
+}
+`;
+}
+
+export const generateGoalSummaryAI = onCall(
+  {
+    region: "asia-southeast1",
+    timeoutSeconds: 60,
+    memory: "512MiB",
+    secrets: [GEMINI_API_KEY],
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Bạn cần đăng nhập.");
+    }
+
+    const goal = request.data?.goal as GoalSummaryInput | undefined;
+
+    if (!goal) {
+      throw new HttpsError("invalid-argument", "Thiếu dữ liệu goal.");
+    }
+
+    const domain = String(goal.domain || "").trim();
+    const supportText = String(goal.supportText || "").trim();
+    const teachingContent = String(goal.teachingContent || "").trim();
+
+    const teacherBullets = Array.isArray(goal.teacherBullets) ?
+      goal.teacherBullets.map((item) => String(item).trim()).filter(Boolean) :
+      [];
+
+    if (!domain) {
+      throw new HttpsError("invalid-argument", "Thiếu lĩnh vực.");
+    }
+
+    if (!supportText) {
+      throw new HttpsError("invalid-argument", "Thiếu mức độ hỗ trợ.");
+    }
+
+    if (!teachingContent) {
+      throw new HttpsError("invalid-argument", "Thiếu nội dung dạy/can thiệp.");
+    }
+
+    if (teacherBullets.length === 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Cần nhập ít nhất một gạch đầu dòng của giáo viên."
+      );
+    }
+
+    const cleanedData: GoalSummaryInput = {
+      domain,
+      supportText,
+      teachingContent,
+      teacherBullets,
+    };
+
+    const ai = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY.value(),
+    });
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: buildPrompt(cleanedData),
+        config: {
+          temperature: 0.35,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              summary: {
+                type: Type.STRING,
+              },
+            },
+            required: ["summary"],
+          },
+        },
+      });
+
+      const text = response.text;
+
+      if (!text) {
+        throw new Error("Gemini không trả về nội dung.");
+      }
+
+      const parsed = JSON.parse(text);
+
+      if (!parsed.summary || typeof parsed.summary !== "string") {
+        throw new Error("Gemini trả về JSON không có summary hợp lệ.");
+      }
+
+      return {
+        ok: true,
+        summary: parsed.summary.trim(),
+      };
+    } catch (error) {
+      console.error("generateGoalSummaryAI error:", error);
+      throw new HttpsError("internal", "Không thể tạo tổng kết bằng AI.");
+    }
   }
 );
 
