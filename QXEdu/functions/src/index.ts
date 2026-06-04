@@ -4,11 +4,13 @@ import admin from "firebase-admin";
 import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
 import {Child, Plan, Report} from "./types";
 import {defineSecret} from "firebase-functions/params";
+import {getAuth} from "firebase-admin/auth";
 import {onDocumentWritten} from "firebase-functions/firestore";
 import axios from "axios";
 
 admin.initializeApp();
 const db = getFirestore();
+const auth = getAuth();
 const FieldValue = admin.firestore.FieldValue;
 
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
@@ -16,6 +18,99 @@ const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
 // const ADMIN_ID = defineSecret("ADMIN_ID");
 type DeleteEntityType = "report" | "plan" | "children";
 
+/**
+ * Tạo tài khoản
+ */
+export const createStaffAccount = onCall(
+  {
+    region: "asia-southeast1",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Bạn chưa đăng nhập");
+    }
+
+    const adminUid = request.auth.uid;
+
+    const adminSnap = await db.collection("users").doc(adminUid).get();
+    const adminData = adminSnap.data();
+
+    if (adminData?.role !== "admin") {
+      throw new HttpsError("permission-denied",
+        "Bạn không có quyền tạo tài khoản");
+    }
+
+    const {
+      email,
+      password,
+      fullName,
+      phone = "",
+      role = "teacher",
+      position = "Chuyên viên Tâm lý",
+    } = request.data;
+
+    if (!email || !password || !fullName) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Thiếu email, mật khẩu hoặc họ tên"
+      );
+    }
+
+    let userRecord;
+
+    try {
+      userRecord = await auth.createUser({
+        email: String(email).trim(),
+        password: String(password),
+        displayName: String(fullName).trim(),
+      });
+
+      await db.collection("users").doc(userRecord.uid).set({
+        id: userRecord.uid,
+
+        avatar: "",
+        birth: null,
+
+        createAt: FieldValue.serverTimestamp(),
+        updateAt: FieldValue.serverTimestamp(),
+
+        email: String(email).trim(),
+        fullName: String(fullName).trim(),
+        phone: String(phone).trim(),
+
+        position,
+        role,
+
+        shortName: "",
+        telegramChatId: "",
+      });
+
+      return {
+        success: true,
+        uid: userRecord.uid,
+        message: "Tạo tài khoản thành công",
+      };
+    } catch (error: any) {
+      if (userRecord?.uid) {
+        await auth.deleteUser(userRecord.uid);
+      }
+
+      if (error.code === "auth/email-already-exists") {
+        throw new HttpsError("already-exists", "Email này đã được sử dụng");
+      }
+
+      if (error.code === "auth/invalid-email") {
+        throw new HttpsError("invalid-argument", "Email không hợp lệ");
+      }
+
+      if (error.code === "auth/invalid-password") {
+        throw new HttpsError("invalid-argument", "Mật khẩu không hợp lệ");
+      }
+
+      throw new HttpsError("internal", "Tạo tài khoản thất bại");
+    }
+  }
+);
 /**
  * Tạo mới kế hoạch từ carts
  */
@@ -1438,7 +1533,7 @@ async function sendTelegram(
         inline_keyboard: [
           [
             {
-              text: "🔍 Xem chi tiết",
+              text: "Mở link ở Safari (nếu trên iOS) hoặc mở trực tiếp (Android)",
               url: `https://can-thiep-quang-xuong.vercel.app/${route}`,
             },
           ],

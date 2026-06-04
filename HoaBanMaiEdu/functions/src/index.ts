@@ -1327,3 +1327,136 @@ function getReminderFooter(level: ReminderLevel) {
 
   return "\n\n⚠️ Hôm nay là hạn cuối. Cô vui lòng hoàn thành ngay trong ngày.";
 }
+/* =====================================================
+   AI GERMINI REPORT SUMMARY
+===================================================== */
+
+import {GoogleGenAI, Type} from "@google/genai";
+
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+
+type GoalSummaryInput = {
+  supportText: string;
+  teachingContent: string;
+  teacherBullets: string[];
+};
+
+function buildPrompt(data: GoalSummaryInput) {
+  return `
+Bạn là giáo viên can thiệp viết báo cáo tổng kết cuối tháng cho trẻ.
+
+Nhiệm vụ:
+Dựa vào các dữ liệu được cung cấp, hãy viết phần "Tổng kết" 
+phù hợp cho mục tiêu can thiệp.
+
+Dữ liệu:
+- Mức độ hỗ trợ: ${data.supportText}
+- Nội dung dạy/can thiệp: ${data.teachingContent}
+- Ghi chú/gạch đầu dòng của giáo viên:
+${data.teacherBullets.map((item, index) => `${index + 1}. ${item}`).join("\n")}
+
+Yêu cầu:
+Đây là phần nhận xét tổng kết về mục tiêu can thiệp trong tháng của trẻ. 
+Tôi cần viết lại tổng kết trong vòng 10-15 câu 
+mang tính khai quát hoá - tổng kết hoá về khả năng - mức độ 
+và hạn chế của con trong mục tiêu này ( viết mang tính chuyên môn ) 
+kèm ví dụ cụ thể. Xưng hô là cô - con
+
+Chỉ trả về JSON hợp lệ theo format:
+{
+  "summary": "..."
+}
+`;
+}
+
+export const generateGoalSummaryAI = onCall(
+  {
+    region: "asia-southeast1",
+    timeoutSeconds: 60,
+    memory: "512MiB",
+    secrets: [GEMINI_API_KEY],
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Bạn cần đăng nhập.");
+    }
+
+    const goal = request.data?.goal as GoalSummaryInput | undefined;
+
+    if (!goal) {
+      throw new HttpsError("invalid-argument", "Thiếu dữ liệu goal.");
+    }
+
+    const supportText = String(goal.supportText || "").trim();
+    const teachingContent = String(goal.teachingContent || "").trim();
+
+    const teacherBullets = Array.isArray(goal.teacherBullets) ?
+      goal.teacherBullets.map((item) => String(item).trim()).filter(Boolean) :
+      [];
+
+    if (!supportText) {
+      throw new HttpsError("invalid-argument", "Thiếu mức độ hỗ trợ.");
+    }
+
+    if (!teachingContent) {
+      throw new HttpsError("invalid-argument", "Thiếu nội dung dạy/can thiệp.");
+    }
+
+    if (teacherBullets.length === 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Cần nhập ít nhất một gạch đầu dòng của giáo viên."
+      );
+    }
+
+    const cleanedData: GoalSummaryInput = {
+      supportText,
+      teachingContent,
+      teacherBullets,
+    };
+
+    const ai = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY.value(),
+    });
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: buildPrompt(cleanedData),
+        config: {
+          temperature: 0.35,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              summary: {
+                type: Type.STRING,
+              },
+            },
+            required: ["summary"],
+          },
+        },
+      });
+
+      const text = response.text;
+
+      if (!text) {
+        throw new Error("Gemini không trả về nội dung.");
+      }
+
+      const parsed = JSON.parse(text);
+
+      if (!parsed.summary || typeof parsed.summary !== "string") {
+        throw new Error("Gemini trả về JSON không có summary hợp lệ.");
+      }
+
+      return {
+        ok: true,
+        summary: parsed.summary.trim(),
+      };
+    } catch (error) {
+      console.error("generateGoalSummaryAI error:", error);
+      throw new HttpsError("internal", "Không thể tạo tổng kết bằng AI.");
+    }
+  }
+);
