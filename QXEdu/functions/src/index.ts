@@ -1,4 +1,3 @@
-/* eslint-disable require-jsdoc */
 import {getFirestore} from "firebase-admin/firestore";
 import admin from "firebase-admin";
 import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
@@ -271,11 +270,25 @@ export const updatePlanFromCarts = onCall(
       );
     }
 
-    const oldTasksSnap = await db
-      .collection("planTasks")
-      .where("planId", "==", planId)
-      .where("teacherIds", "array-contains", uid)
-      .get();
+    // const oldTasksSnap = await db
+    //   .collection("planTasks")
+    //   .where("planId", "==", planId)
+    //   .where("teacherIds", "array-contains", uid)
+    //   .get();
+
+    const [oldTasksSnap, cartsSnap] = await Promise.all([
+      db
+        .collection("planTasks")
+        .where("planId", "==", planId)
+        .where("teacherIds", "array-contains", uid)
+        .get(),
+
+      db
+        .collection("carts")
+        .where("childId", "==", childId)
+        .where("authorId", "==", uid)
+        .get(),
+    ]);
 
     const batch = db.batch();
 
@@ -305,6 +318,12 @@ export const updatePlanFromCarts = onCall(
         updateAt: FieldValue.serverTimestamp(),
       });
     });
+
+    // Xóa toàn bộ carts của trẻ do giáo viên này tạo
+    cartsSnap.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
     batch.update(db.collection("Meta").doc("plans"), {
       lastUpdated: FieldValue.serverTimestamp(),
     });
@@ -361,11 +380,13 @@ export const deletePlan = onCall(
       reportsSnap,
       reportTasksSnap,
       reportSavedsSnap,
+      commentsSnap,
     ] = await Promise.all([
       db.collection("planTasks").where("planId", "==", planId).get(),
       db.collection("reports").where("planId", "==", planId).get(),
       db.collection("reportTasks").where("planId", "==", planId).get(),
       db.collection("reportSaveds").where("planId", "==", planId).get(),
+      db.collection("comments").where("_id", "==", planId).get(),
     ]);
 
     const batch = db.batch();
@@ -376,6 +397,7 @@ export const deletePlan = onCall(
     reportsSnap.docs.forEach((doc) => batch.delete(doc.ref));
     reportTasksSnap.docs.forEach((doc) => batch.delete(doc.ref));
     reportSavedsSnap.docs.forEach((doc) => batch.delete(doc.ref));
+    commentsSnap.docs.forEach((doc) => batch.delete(doc.ref));
 
     batch.set(
       db.collection("Meta").doc("plans"),
@@ -391,6 +413,12 @@ export const deletePlan = onCall(
 
     batch.set(
       db.collection("Meta").doc("reportSaveds"),
+      {lastUpdated: FieldValue.serverTimestamp()},
+      {merge: true}
+    );
+
+    batch.set(
+      db.collection("Meta").doc("comments"),
       {lastUpdated: FieldValue.serverTimestamp()},
       {merge: true}
     );
@@ -411,6 +439,7 @@ export const deletePlan = onCall(
         reports: reportsSnap.size,
         reportTasks: reportTasksSnap.size,
         reportSaveds: reportSavedsSnap.size,
+        comments: commentsSnap.size,
       },
     };
   }
@@ -468,7 +497,6 @@ Chỉ trả về JSON hợp lệ theo format:
 }
 `;
 }
-
 export const generateGoalSummaryAI = onCall(
   {
     region: "asia-southeast1",
@@ -1002,6 +1030,10 @@ export const deleteReport = onCall(
       .collection("reportTasks")
       .where("reportId", "==", reportId)
       .get();
+    const commentsSnap = await db
+      .collection("comments")
+      .where("_id", "==", reportId)
+      .get();
 
     const batch = db.batch();
 
@@ -1010,9 +1042,17 @@ export const deleteReport = onCall(
     reportTasksSnap.docs.forEach((doc) => {
       batch.delete(doc.ref);
     });
+    commentsSnap.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
 
     batch.set(
       db.collection("Meta").doc("reports"),
+      {lastUpdated: FieldValue.serverTimestamp()},
+      {merge: true}
+    );
+    batch.set(
+      db.collection("Meta").doc("comments"),
       {lastUpdated: FieldValue.serverTimestamp()},
       {merge: true}
     );
@@ -1031,8 +1071,9 @@ export const deleteReport = onCall(
       deleted: {
         reports: 1,
         reportTasks: reportTasksSnap.size,
+        comments: commentsSnap.size,
       },
-      deletedCount: 1 + reportTasksSnap.size,
+      deletedCount: 1 + reportTasksSnap.size + commentsSnap.size,
     };
   }
 );
@@ -1078,6 +1119,7 @@ export const deleteChildDeep = onCall(
       reportsSnap,
       reportTasksSnap,
       reportSavedsSnap,
+      commentsSnap,
     ] = await Promise.all([
       db.collection("carts").where("childId", "==", childId).get(),
       db.collection("plans").where("childId", "==", childId).get(),
@@ -1085,6 +1127,7 @@ export const deleteChildDeep = onCall(
       db.collection("reports").where("childId", "==", childId).get(),
       db.collection("reportTasks").where("childId", "==", childId).get(),
       db.collection("reportSaveds").where("childId", "==", childId).get(),
+      db.collection("comments").where("childId", "==", childId).get(),
     ]);
 
     // 🔥 helper chia batch (tránh vượt 500 ops)
@@ -1106,6 +1149,7 @@ export const deleteChildDeep = onCall(
     await commitInBatches(reportTasksSnap.docs);
     await commitInBatches(reportSavedsSnap.docs);
     await commitInBatches(reportsSnap.docs);
+    await commitInBatches(commentsSnap.docs);
 
     // 🧹 xoá child cuối cùng
     await childRef.delete();
@@ -1114,7 +1158,7 @@ export const deleteChildDeep = onCall(
     const metaUpdates = [
       "children", "plans",
       "reports", "carts",
-      "reportSaveds",
+      "reportSaveds", "comments",
     ];
 
     await Promise.all(
@@ -1146,6 +1190,7 @@ export const deleteChildDeep = onCall(
         reports: reportsSnap.size,
         reportTasks: reportTasksSnap.size,
         reportSaveds: reportSavedsSnap.size,
+        comments: commentsSnap.size,
       },
       deletedPlansCount: plansSnap.size,
       deletedReportsCount: reportsSnap.size,
@@ -1397,6 +1442,7 @@ export const deleteTeacherDeep = onCall(
       "reports",
       "reportTasks",
       "reportSaveds",
+      "comments",
     ];
 
     // Children chỉ cần remove teacherIds
@@ -1501,6 +1547,10 @@ export const deleteTeacherDeep = onCall(
         {lastUpdated: FieldValue.serverTimestamp()},
         {merge: true}
       ),
+      db.collection("Meta").doc("comments").set(
+        {lastUpdated: FieldValue.serverTimestamp()},
+        {merge: true}
+      ),
     ]);
 
     return {
@@ -1533,7 +1583,8 @@ async function sendTelegram(
         inline_keyboard: [
           [
             {
-              text: "Mở link ở Safari (nếu trên iOS) hoặc mở trực tiếp (Android)",
+              text: `Mở link ở Safari (nếu trên iOS) 
+              hoặc mở trực tiếp (Android)`,
               url: `https://can-thiep-quang-xuong.vercel.app/${route}`,
             },
           ],
@@ -1747,7 +1798,8 @@ export const onReportWrite = onDocumentWritten(
               u.telegramChatId,
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý báo cáo "<b>${title}</b>"` +
-                ` của trẻ "<b>${child.fullName}</b>"`,
+                ` của trẻ "<b>${child.fullName}</b>": `+
+                `<i>${comment}</i>`,
               botToken,
               `home/${child.id}/pending`
             )
@@ -1909,7 +1961,8 @@ export const onPlanWrite = onDocumentWritten(
               u.telegramChatId,
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý kế hoạch "<b>${title}</b>"` +
-                ` của trẻ "<b>${child.fullName}</b>"`,
+                ` của trẻ "<b>${child.fullName}</b>": ` +
+                `${comment}`,
               botToken,
               `home/${child.id}/pending`
             )
