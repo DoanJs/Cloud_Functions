@@ -271,11 +271,25 @@ export const updatePlanFromCarts = onCall(
       );
     }
 
-    const oldTasksSnap = await db
-      .collection("planTasks")
-      .where("planId", "==", planId)
-      .where("teacherIds", "array-contains", uid)
-      .get();
+    // const oldTasksSnap = await db
+    //   .collection("planTasks")
+    //   .where("planId", "==", planId)
+    //   .where("teacherIds", "array-contains", uid)
+    //   .get();
+
+    const [oldTasksSnap, cartsSnap] = await Promise.all([
+      db
+        .collection("planTasks")
+        .where("planId", "==", planId)
+        .where("teacherIds", "array-contains", uid)
+        .get(),
+
+      db
+        .collection("carts")
+        .where("childId", "==", childId)
+        .where("authorId", "==", uid)
+        .get(),
+    ]);
 
     const batch = db.batch();
 
@@ -305,6 +319,12 @@ export const updatePlanFromCarts = onCall(
         updateAt: FieldValue.serverTimestamp(),
       });
     });
+
+    // Xóa toàn bộ carts của trẻ do giáo viên này tạo
+    cartsSnap.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
     batch.update(db.collection("Meta").doc("plans"), {
       lastUpdated: FieldValue.serverTimestamp(),
     });
@@ -1424,6 +1444,7 @@ export const deleteTeacherDeep = onCall(
       "reports",
       "reportTasks",
       "reportSaveds",
+      "comments",
     ];
 
     // Children chỉ cần remove teacherIds
@@ -1525,6 +1546,10 @@ export const deleteTeacherDeep = onCall(
         {merge: true}
       ),
       db.collection("Meta").doc("reportSaveds").set(
+        {lastUpdated: FieldValue.serverTimestamp()},
+        {merge: true}
+      ),
+      db.collection("Meta").doc("comments").set(
         {lastUpdated: FieldValue.serverTimestamp()},
         {merge: true}
       ),
@@ -1775,7 +1800,8 @@ export const onReportWrite = onDocumentWritten(
               u.telegramChatId,
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý báo cáo "<b>${title}</b>"` +
-                ` của trẻ "<b>${child.fullName}</b>"`,
+                ` của trẻ "<b>${child.fullName}</b>": `+
+                `<i>${comment}</i>`,
               botToken,
               `home/${child.id}/pending`
             )
@@ -1937,7 +1963,8 @@ export const onPlanWrite = onDocumentWritten(
               u.telegramChatId,
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý kế hoạch "<b>${title}</b>"` +
-                ` của trẻ "<b>${child.fullName}</b>"`,
+                ` của trẻ "<b>${child.fullName}</b>": ` +
+                `${comment}`,
               botToken,
               `home/${child.id}/pending`
             )
