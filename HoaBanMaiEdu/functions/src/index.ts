@@ -3440,7 +3440,7 @@ export const onPlanWrite = onDocumentWritten(
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý kế hoạch "<b>${title}</b>"` +
                 ` của trẻ "<b>${child.fullName}</b>": ` +
-                `${comment}`,
+                `<i>${comment}</i>`,
               botToken,
               `home/${child.id}/pending`
             )

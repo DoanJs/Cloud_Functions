@@ -13,8 +13,6 @@ const auth = getAuth();
 const FieldValue = admin.firestore.FieldValue;
 
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
-// const ADMIN_CHAT_ID = defineSecret("ADMIN_CHAT_ID");
-// const ADMIN_ID = defineSecret("ADMIN_ID");
 type DeleteEntityType = "report" | "plan" | "children";
 
 /**
@@ -269,12 +267,6 @@ export const updatePlanFromCarts = onCall(
         "Bạn không có quyền với trẻ này."
       );
     }
-
-    // const oldTasksSnap = await db
-    //   .collection("planTasks")
-    //   .where("planId", "==", planId)
-    //   .where("teacherIds", "array-contains", uid)
-    //   .get();
 
     const [oldTasksSnap, cartsSnap] = await Promise.all([
       db
@@ -1799,7 +1791,7 @@ export const onReportWrite = onDocumentWritten(
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý báo cáo "<b>${title}</b>"` +
                 ` của trẻ "<b>${child.fullName}</b>": `+
-                `<i style={{color: 'red'}}>${comment}</i>`,
+                `<i>${comment}</i>`,
               botToken,
               `home/${child.id}/pending`
             )
@@ -1962,7 +1954,7 @@ export const onPlanWrite = onDocumentWritten(
               `💬 <b>${convertPosition(actor.position)} ${actor.fullName}</b>` +
                 ` đã góp ý kế hoạch "<b>${title}</b>"` +
                 ` của trẻ "<b>${child.fullName}</b>": ` +
-                `<i style={{color: 'red'}}>${comment}</i>`,
+                `<i>${comment}</i>`,
               botToken,
               `home/${child.id}/pending`
             )
