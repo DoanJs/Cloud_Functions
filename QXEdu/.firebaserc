@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "hoabanmaiedu-mobile"
-  }
+    "default": "qxedu-8ae4b"
+  },
+  "targets": {},
+  "etags": {}
 }
