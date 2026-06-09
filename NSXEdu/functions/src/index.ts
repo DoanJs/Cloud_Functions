@@ -701,7 +701,7 @@ export const createReportFromPlan = onCall(
           isEdit: false,
           teacherIds,
           authorId: uid,
-          intervention: item.intervention ?? "0",
+          intervention: item.intervention ?? [],
           createAt: FieldValue.serverTimestamp(),
           updateAt: FieldValue.serverTimestamp(),
         },
