@@ -3063,7 +3063,7 @@ async function sendTelegram(
             {
               text: `Mở link ở Safari (nếu trên iOS) 
               hoặc mở trực tiếp (Android)`,
-              url: `https://can-thiep-quang-xuong.vercel.app/${route}`,
+              url: `https://hoa-ban-mai-edu.vercel.app/${route}`,
             },
           ],
         ],
@@ -3789,7 +3789,7 @@ function formatPending(title: string, items: any[]) {
   text += shownItems
     .map(
       (p, i) =>
-        `<a href="https://can-thiep-quang-xuong.vercel.app/home/${p.childId}/pending">` +
+        `<a href="https://hoa-ban-mai-edu.vercel.app/home/${p.childId}/pending">` +
         `${i + 1}. 👶 <b>${p.title} - ${p.childFullName ?? "Không rõ"}</b>` +
         "</a>"
     )
