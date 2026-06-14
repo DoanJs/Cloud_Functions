@@ -1,5 +1,5 @@
 /* eslint-disable require-jsdoc */
-import {getFirestore} from "firebase-admin/firestore";
+import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import admin from "firebase-admin";
 import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
 import {Child, Plan, Report} from "./types";
@@ -1556,7 +1556,7 @@ async function sendTelegram(
             {
               text: `Mở link ở Safari (nếu trên iOS) hoặc
                mở trực tiếp (Android)`,
-              url: `https://can-thiep-quang-xuong.vercel.app/${route}`,
+              url: `https://can-thiep-som-ngoi-sao-xanh.vercel.app/${route}`,
             },
           ],
         ],
@@ -2280,7 +2280,7 @@ function formatPending(title: string, items: any[]) {
   text += shownItems
     .map(
       (p, i) =>
-        `<a href="https://can-thiep-quang-xuong.vercel.app/home/${p.childId}/pending">` +
+        `<a href="https://can-thiep-som-ngoi-sao-xanh.vercel.app/home/${p.childId}/pending">` +
         `${i + 1}. 👶 <b>${p.title} - ${p.childFullName ?? "Không rõ"}</b>` +
         "</a>"
     )
@@ -2617,4 +2617,149 @@ function getReminderFooter(level: ReminderLevel) {
   }
 
   return "\n\n⚠️ Hôm nay là hạn cuối. Cô vui lòng hoàn thành ngay trong ngày.";
+}
+
+/* =====================================================
+   CLOUD FUNCTION BACKUP DATA EVERY SUNDAY 4AM
+===================================================== */
+
+const BACKUP_COLLECTIONS = [
+  "Meta",
+  "carts",
+  "children",
+  "fields",
+  "interventions",
+  "planTasks",
+  "plans",
+  "reportTasks",
+  "reports",
+  "targets",
+  "users",
+  "reportSaveds",
+  "comments",
+];
+
+export const weeklyBackupFirestoreToTelegram = onSchedule(
+  {
+    // schedule: "*/2 * * * *", // test mỗi 2 phút
+    schedule: "0 4 * * 0", // 4h sáng Chủ nhật hàng tuần
+    timeZone: "Asia/Ho_Chi_Minh",
+    region: "asia-southeast1",
+    secrets: [TELEGRAM_BOT_TOKEN],
+  },
+  async () => {
+    const backupData: Record<string, any[]> = {};
+
+    for (const collectionName of BACKUP_COLLECTIONS) {
+      backupData[collectionName] = await fetchCollectionAdmin(collectionName);
+    }
+
+    const now = new Date();
+    const dateText = formatDateForFile(now);
+
+    const filename = `firestore_backup_NXSEdu_${dateText}.js`;
+
+    const jsContent =
+      `/* Backup Firestore - ${now.toLocaleString("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh",
+      })} */\n\n` +
+      `export const firestoreData = ${JSON.stringify(backupData, null, 2)};\n`;
+
+    await sendTelegramDocument({
+      chatId: "8338357435",
+      filename,
+      content: jsContent,
+      caption: `🗂 Backup dữ liệu Firestore\n📅 ${dateText}`,
+    });
+  }
+);
+
+async function fetchCollectionAdmin(collectionName: string) {
+  const snapshot = await db.collection(collectionName).get();
+
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...normalizeFirestoreData(doc.data()),
+  }));
+}
+
+function normalizeFirestoreData(data: any): any {
+  if (data instanceof Timestamp) {
+    return {
+      _type: "Timestamp",
+      seconds: data.seconds,
+      nanoseconds: data.nanoseconds,
+      iso: data.toDate().toISOString(),
+    };
+  }
+
+  if (data instanceof Date) {
+    return data.toISOString();
+  }
+
+  if (Array.isArray(data)) {
+    return data.map((item) => normalizeFirestoreData(item));
+  }
+
+  if (data && typeof data === "object") {
+    const result: Record<string, any> = {};
+
+    for (const key of Object.keys(data)) {
+      result[key] = normalizeFirestoreData(data[key]);
+    }
+
+    return result;
+  }
+
+  return data;
+}
+
+async function sendTelegramDocument({
+  chatId,
+  filename,
+  content,
+  caption,
+}: {
+  chatId: string;
+  filename: string;
+  content: string;
+  caption?: string;
+}) {
+  const token = TELEGRAM_BOT_TOKEN.value();
+
+  const formData = new FormData();
+
+  formData.append("chat_id", chatId);
+  formData.append("caption", caption || "");
+
+  const fileBlob = new Blob([content], {
+    type: "application/javascript",
+  });
+
+  formData.append("document", fileBlob, filename);
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/sendDocument`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Send Telegram backup failed: ${errorText}`);
+  }
+}
+
+function formatDateForFile(date: Date) {
+  const vnDate = new Date(
+    date.toLocaleString("en-US", {timeZone: "Asia/Ho_Chi_Minh"})
+  );
+
+  const day = String(vnDate.getDate()).padStart(2, "0");
+  const month = String(vnDate.getMonth() + 1).padStart(2, "0");
+  const year = vnDate.getFullYear();
+
+  return `${day}-${month}-${year}`;
 }
