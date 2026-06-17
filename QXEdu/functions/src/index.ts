@@ -2786,3 +2786,209 @@ function formatDateForFile(date: Date) {
 
   return `${day}-${month}-${year}`;
 }
+
+/* =====================================================
+   CLOUD FUNCTION UPLOAD IMAGE CLOUDINARY
+===================================================== */
+import {v2 as cloudinary} from "cloudinary";
+
+const CLOUDINARY_CLOUD_NAME = defineSecret("CLOUDINARY_CLOUD_NAME");
+const CLOUDINARY_API_KEY = defineSecret("CLOUDINARY_API_KEY");
+const CLOUDINARY_API_SECRET = defineSecret("CLOUDINARY_API_SECRET");
+
+export const uploadTeacherAvatar = onCall(
+  {
+    region: "asia-southeast1",
+    secrets: [
+      CLOUDINARY_CLOUD_NAME,
+      CLOUDINARY_API_KEY,
+      CLOUDINARY_API_SECRET,
+    ],
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Chưa đăng nhập");
+    }
+
+    const {teacherId, imageBase64} = request.data;
+
+    if (!teacherId || !imageBase64) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Thiếu teacherId hoặc imageBase64"
+      );
+    }
+
+    const currentUserRef = db.collection("users").doc(uid);
+    const teacherRef = db.collection("users").doc(teacherId);
+
+    const [currentUserSnap, teacherSnap] = await Promise.all([
+      currentUserRef.get(),
+      teacherRef.get(),
+    ]);
+
+    if (!currentUserSnap.exists) {
+      throw new HttpsError("not-found", "Không tìm thấy tài khoản");
+    }
+
+    if (!teacherSnap.exists) {
+      throw new HttpsError("not-found", "Không tìm thấy giáo viên");
+    }
+
+    const currentUser = currentUserSnap.data();
+    const isAdmin = currentUser?.role === "admin";
+
+    if (!isAdmin && teacherId !== uid) {
+      throw new HttpsError(
+        "permission-denied",
+        "Bạn chỉ được đổi avatar của chính mình"
+      );
+    }
+
+    cloudinary.config({
+      cloud_name: CLOUDINARY_CLOUD_NAME.value(),
+      api_key: CLOUDINARY_API_KEY.value(),
+      api_secret: CLOUDINARY_API_SECRET.value(),
+    });
+
+    try {
+      // const uploadResult = await cloudinary.uploader.upload(imageBase64, {
+      //   public_id: `NSXEdu/avatars/${teacherId}`,
+      //   overwrite: true,
+      //   resource_type: "image",
+      //   invalidate: true,
+      // });
+
+      const uploadResult = await cloudinary.uploader.upload(
+        imageBase64,
+        {
+          folder: "QXEdu/avatars/teacher",
+          public_id: teacherId,
+          overwrite: true,
+          resource_type: "image",
+          invalidate: true,
+        }
+      );
+
+      await teacherRef.update({
+        avatar: uploadResult.secure_url,
+        updateById: uid,
+        updateAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await db.collection("Meta").doc("users").set(
+        {
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        {merge: true}
+      );
+
+      return {
+        success: true,
+        teacherId,
+        avatar: uploadResult.secure_url,
+      };
+    } catch (error) {
+      console.error(error);
+
+      throw new HttpsError("internal", "Upload avatar thất bại");
+    }
+  }
+);
+
+export const uploadChildAvatar = onCall(
+  {
+    region: "asia-southeast1",
+    secrets: [
+      CLOUDINARY_CLOUD_NAME,
+      CLOUDINARY_API_KEY,
+      CLOUDINARY_API_SECRET,
+    ],
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Chưa đăng nhập");
+    }
+
+    const {childId, imageBase64} = request.data;
+
+    if (!childId || !imageBase64) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Thiếu childId hoặc imageBase64"
+      );
+    }
+
+    const currentUserRef = db.collection("users").doc(uid);
+    const childRef = db.collection("children").doc(childId);
+
+    const [currentUserSnap, childSnap] = await Promise.all([
+      currentUserRef.get(),
+      childRef.get(),
+    ]);
+
+    if (!currentUserSnap.exists) {
+      throw new HttpsError("not-found", "Không tìm thấy tài khoản");
+    }
+
+    if (!childSnap.exists) {
+      throw new HttpsError("not-found", "Không tìm thấy trẻ");
+    }
+
+    const currentUser = currentUserSnap.data();
+    const isAdmin = currentUser?.role === "admin";
+
+    if (!isAdmin) {
+      throw new HttpsError(
+        "permission-denied",
+        "Chỉ admin mới được thay ảnh của trẻ"
+      );
+    }
+
+    cloudinary.config({
+      cloud_name: CLOUDINARY_CLOUD_NAME.value(),
+      api_key: CLOUDINARY_API_KEY.value(),
+      api_secret: CLOUDINARY_API_SECRET.value(),
+    });
+
+    try {
+      const uploadResult = await cloudinary.uploader.upload(
+        imageBase64,
+        {
+          folder: "QXEdu/avatars/children",
+          public_id: childId,
+          overwrite: true,
+          resource_type: "image",
+          invalidate: true,
+        }
+      );
+
+      await childRef.update({
+        avatar: uploadResult.secure_url,
+        updateById: uid,
+        updateAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await db.collection("Meta").doc("children").set(
+        {
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        {merge: true}
+      );
+
+      return {
+        success: true,
+        childId,
+        avatar: uploadResult.secure_url,
+      };
+    } catch (error) {
+      console.error(error);
+
+      throw new HttpsError("internal", "Upload avatar trẻ thất bại");
+    }
+  }
+);
