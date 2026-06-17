@@ -2831,12 +2831,23 @@ export const uploadTeacherAvatar = onCall(
     });
 
     try {
-      const uploadResult = await cloudinary.uploader.upload(imageBase64, {
-        public_id: `NSXEdu/avatars/${teacherId}`,
-        overwrite: true,
-        resource_type: "image",
-        invalidate: true,
-      });
+      // const uploadResult = await cloudinary.uploader.upload(imageBase64, {
+      //   public_id: `NSXEdu/avatars/${teacherId}`,
+      //   overwrite: true,
+      //   resource_type: "image",
+      //   invalidate: true,
+      // });
+
+      const uploadResult = await cloudinary.uploader.upload(
+        imageBase64,
+        {
+          folder: "NSXEdu/avatars",
+          public_id: teacherId,
+          overwrite: true,
+          resource_type: "image",
+          invalidate: true,
+        }
+      );
 
       await teacherRef.update({
         avatar: uploadResult.secure_url,
