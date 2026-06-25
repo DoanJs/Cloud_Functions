@@ -491,6 +491,10 @@ export const generateGoalSummaryAI = onCall(
     timeoutSeconds: 60,
     memory: "512MiB",
     secrets: [GEMINI_API_KEY],
+    // cors: [
+    //   "http://localhost:3000",
+    //   "https://can-thiep-som-nha-trang.vercel.app",
+    // ],
   },
   async (request) => {
     if (!request.auth) {
@@ -595,9 +599,9 @@ export const createReportFromPlan = onCall(
       throw new HttpsError("unauthenticated", "Chưa đăng nhập");
     }
 
-    const {subTitle, childId, planId, addReports, isReportSaved} = request.data;
+    const {childId, planId, addReports, isReportSaved} = request.data;
 
-    if (!subTitle || !childId || !planId || !Array.isArray(addReports)) {
+    if (!childId || !planId || !Array.isArray(addReports)) {
       throw new HttpsError("invalid-argument", "Dữ liệu không hợp lệ");
     }
 
@@ -659,7 +663,6 @@ export const createReportFromPlan = onCall(
     const reportData = {
       type: "BC",
       title: plan?.title || "",
-      subTitle,
       childId,
       teacherIds,
       authorId: uid,
