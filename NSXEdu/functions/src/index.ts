@@ -221,9 +221,9 @@ export const updatePlanFromCarts = onCall(
       throw new HttpsError("unauthenticated", "Bạn chưa đăng nhập.");
     }
 
-    const {planId, childId, carts} = request.data;
+    const {planId, childId, carts, title} = request.data;
 
-    if (!planId || !childId || !Array.isArray(carts)) {
+    if (!planId || !childId || !Array.isArray(carts) ||!title) {
       throw new HttpsError("invalid-argument", "Dữ liệu không hợp lệ.");
     }
 
@@ -288,6 +288,7 @@ export const updatePlanFromCarts = onCall(
     const batch = db.batch();
 
     batch.update(planRef, {
+      title,
       updateById: uid,
       updateAt: FieldValue.serverTimestamp(),
     });
