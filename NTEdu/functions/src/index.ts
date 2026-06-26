@@ -703,7 +703,6 @@ export const createReportFromPlan = onCall(
           isEdit: false,
           teacherIds,
           authorId: uid,
-          intervention: item.intervention ?? [],
           createAt: FieldValue.serverTimestamp(),
           updateAt: FieldValue.serverTimestamp(),
         },
@@ -840,7 +839,7 @@ export const saveReportSaveds = onCall(
 
       const {id, ...data} = item;
 
-      const savedData = {// intervention da co trong ...data luon roi
+      const savedData = {
         ...data,
         childId,
         planId,
@@ -954,7 +953,6 @@ export const updateReportTasks = onCall(
       const ref = db.collection("reportTasks").doc(task.id);
 
       batch.update(ref, {
-        intervention: task.intervention || [],
         content: task.content || "",
         updateAt: FieldValue.serverTimestamp(),
       });
