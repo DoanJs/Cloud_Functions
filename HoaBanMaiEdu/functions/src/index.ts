@@ -4157,6 +4157,7 @@ export const weeklyBackupFirestoreToTelegram = onSchedule(
     schedule: "0 4 * * 0", // 4h sáng Chủ nhật hàng tuần
     timeZone: "Asia/Ho_Chi_Minh",
     region: "asia-southeast1",
+    memory: "1GiB",
     secrets: [TELEGRAM_BOT_TOKEN],
   },
   async () => {
