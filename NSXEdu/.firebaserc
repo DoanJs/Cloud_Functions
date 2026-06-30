@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "hoabanmaiedu-mobile"
-  }
+    "default": "nsxedu"
+  },
+  "targets": {},
+  "etags": {}
 }
